@@ -33,7 +33,8 @@ pnpm check:evidence  # the process-evidence check CI runs before you ship
 pnpm build           # produce dist/ (what gets deployed)
 
 # reproduce CI's links check before you push
-pnpm dlx linkinator ./dist --silent --skip "^https?://(?!localhost|127)"
+pnpm exec astro preview --port 4321 &
+pnpm dlx linkinator "http://localhost:4321/comp4020-crit5-BrynMtchll/" --silent --recurse --skip "^https?://(?!localhost|127)"
 ```
 
 `mise` is the course's recommended runtime manager. If you use another manager
@@ -43,7 +44,9 @@ problems with mise.
 
 ## What's here
 
-- `index.html`, `styles.css`, `main.ts` --- a minimal starting site. Replace it.
+- `src/pages/index.astro`, `src/styles/` --- the page and its CSS.
+- `src/lib/garden.ts` --- the simulation core: DOM-free, clock-free, deterministic.
+- `src/game/` --- the canvas layer: can physics, layout, drawing, the loop.
 - `mise.toml` --- the tested Node and pnpm versions for this template.
 - `spec/` --- what the checks are for (`README.md`) and the shipped invariants
   (`invariants.test.ts`); the spec tests you write live alongside them.
