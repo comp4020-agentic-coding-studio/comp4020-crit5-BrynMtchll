@@ -4,7 +4,7 @@
 //
 // Pure and deterministic, like the soil: same inputs, same wobble.
 
-import { SKY_H, WORLD_H, WORLD_W } from "./world";
+import type { Layout } from "./world";
 
 /** Spring pulling the can toward your hand. Low enough to overshoot. */
 const PULL = 46;
@@ -28,11 +28,17 @@ export interface Can {
   readonly tilt: number;
 }
 
-export function createCan(): Can {
-  return { x: WORLD_W / 2, y: SKY_H * 0.45, vx: 0, vy: 0, tilt: 0 };
+export function createCan(layout: Layout): Can {
+  return { x: layout.width / 2, y: layout.originY * 0.45, vx: 0, vy: 0, tilt: 0 };
 }
 
-export function stepCan(can: Can, targetX: number, targetY: number, dt: number): Can {
+export function stepCan(
+  can: Can,
+  layout: Layout,
+  targetX: number,
+  targetY: number,
+  dt: number,
+): Can {
   const ax = (targetX - can.x) * PULL - can.vx * DRAG;
   const ay = (targetY - can.y) * PULL - can.vy * DRAG;
 
@@ -41,8 +47,8 @@ export function stepCan(can: Can, targetX: number, targetY: number, dt: number):
 
   // Clamped to the frame so a hard flick can't fling the can off-screen and
   // leave the player with nothing to aim.
-  const x = Math.max(0, Math.min(WORLD_W, can.x + vx * dt));
-  const y = Math.max(0, Math.min(WORLD_H - 40, can.y + vy * dt));
+  const x = Math.max(0, Math.min(layout.width, can.x + vx * dt));
+  const y = Math.max(0, Math.min(layout.height - 40, can.y + vy * dt));
 
   const wanted = Math.max(-MAX_TILT, Math.min(MAX_TILT, vx * TILT_PER_SPEED));
   const tilt = can.tilt + (wanted - can.tilt) * Math.min(1, TILT_LAG * dt);

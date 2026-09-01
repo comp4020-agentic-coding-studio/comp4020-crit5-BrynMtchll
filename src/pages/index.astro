@@ -6,10 +6,10 @@ import "../styles/global.css";
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>COMP4020 prototype</title>
+    <title>Beside</title>
     <meta
       name="description"
-      content="Replace this with one sentence saying what this page is. A search result and a link preview both show it."
+      content="A garden, a season, and a watering can with far too much momentum. Roots drink from the soil around a plant, never from underneath it."
     />
 
     <!--
@@ -29,12 +29,15 @@ import "../styles/global.css";
     </header>
 
     <main>
-      <h1>COMP4020 prototype</h1>
-      <p>
-        Replace this with your prototype. This week's brief is on the course
-        website; <code>spec/README.md</code> explains how the checks in this repo
-        relate to it.
-      </p>
+      <h1>Beside</h1>
+      <canvas data-garden></canvas>
     </main>
+
+    <script>
+      import { start } from "../game/main";
+
+      const canvas = document.querySelector("canvas[data-garden]");
+      if (canvas instanceof HTMLCanvasElement) start(canvas);
+    </script>
   </body>
 </html>

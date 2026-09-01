@@ -1,9 +1,10 @@
 // The simulation core. No DOM, no clock, no Math.random: `step` is a pure
 // function of (state, dt), so every rule the game can be lost by is testable
 // without rendering anything. The wobble and the drawing live elsewhere.
-
-export const GRID_W = 12;
-export const GRID_H = 8;
+//
+// The grid is state, not a constant. The plot is marked at 1920x1080 and at
+// 390x844, and no single fixed grid reads well at both — so the caller picks
+// dimensions from the viewport and the rules don't care which it picked.
 
 /** Moisture the ring around a plant wants. Growth happens in this band, nowhere else. */
 export const BAND_MIN = 0.3;
@@ -19,7 +20,7 @@ export const CROWN_ROT = 0.78;
 
 export const SEASON_S = 80;
 
-const GROWTH_PER_S = 1 / 38;
+const GROWTH_PER_S = 1 / 30;
 const ROT_PER_S = 1 / 11;
 const THIRST_PER_S = 1 / 26;
 const THIRST_RECOVER_PER_S = 1 / 14;
@@ -27,7 +28,11 @@ const THIRST_RECOVER_PER_S = 1 / 14;
 // Drainage is quadratic in moisture, which is what makes little-and-often beat
 // a deluge: a saturated cell sheds water roughly ten times faster than a damp
 // one, so most of a big pour is gone before any root sees it.
-const DRAIN_K = 0.38;
+//
+// The constant is set by how many beds one can can serve. At 0.38 a damp cell
+// fell out of band in two seconds and nothing survived a season however well
+// it was played; at 0.14 it takes six, which is about one lap of the plot.
+const DRAIN_K = 0.14;
 const DIFFUSE_PER_S = 0.55;
 
 const WEED_GROW_PER_S = 1 / 22;
@@ -35,6 +40,13 @@ const WEED_DRINK_PER_S = 0.22;
 const WEED_INTERVAL_S = 5.5;
 
 export const POUR_PER_S = 1.7;
+
+const NEIGHBOURS = [
+  [-1, 0],
+  [1, 0],
+  [0, -1],
+  [0, 1],
+] as const;
 
 export type Stage = "seed" | "sprout" | "leaf" | "bud" | "bloom" | "dead";
 
@@ -60,6 +72,8 @@ export interface Weed {
 export type Ending = "frost" | "barren";
 
 export interface Garden {
+  readonly w: number;
+  readonly h: number;
   readonly moisture: Float32Array;
   readonly plants: readonly Plant[];
   readonly weeds: readonly Weed[];
@@ -70,12 +84,12 @@ export interface Garden {
   readonly ending: Ending | null;
 }
 
-export function idx(x: number, y: number): number {
-  return y * GRID_W + x;
+export function idx(garden: Pick<Garden, "w">, x: number, y: number): number {
+  return y * garden.w + x;
 }
 
-function inBounds(x: number, y: number): boolean {
-  return x >= 0 && x < GRID_W && y >= 0 && y < GRID_H;
+function inBounds(garden: Garden, x: number, y: number): boolean {
+  return x >= 0 && x < garden.w && y >= 0 && y < garden.h;
 }
 
 /** mulberry32, threaded through state so a season replays identically. */
@@ -96,47 +110,49 @@ export function stageOf(plant: Plant): Stage {
 }
 
 /** The four cells a plant actually drinks from. Never the crown. */
-export function ringMoisture(moisture: Float32Array, cx: number, cy: number): number {
-  const offsets = [
-    [-1, 0],
-    [1, 0],
-    [0, -1],
-    [0, 1],
-  ] as const;
+export function ringMoisture(garden: Garden, cx: number, cy: number): number {
   let total = 0;
   let count = 0;
-  for (const [dx, dy] of offsets) {
+  for (const [dx, dy] of NEIGHBOURS) {
     const x = cx + dx;
     const y = cy + dy;
-    if (!inBounds(x, y)) continue;
-    total += moisture[idx(x, y)] ?? 0;
+    if (!inBounds(garden, x, y)) continue;
+    total += garden.moisture[idx(garden, x, y)] ?? 0;
     count += 1;
   }
   return count === 0 ? 0 : total / count;
 }
 
-export function crownMoisture(moisture: Float32Array, cx: number, cy: number): number {
-  return moisture[idx(cx, cy)] ?? 0;
+export function crownMoisture(garden: Garden, cx: number, cy: number): number {
+  return garden.moisture[idx(garden, cx, cy)] ?? 0;
 }
 
-export function createGarden(seed: number): Garden {
+/** How many beds a plot of this width should open with. */
+function bedCount(w: number): number {
+  return Math.max(3, Math.min(5, Math.round(w / 2.8)));
+}
+
+export function createGarden(seed: number, w = 12, h = 8): Garden {
   // Seeds are already in the ground when a season opens. Planting would be a
   // second verb to discover, and the opening frame has to read in one glance:
   // damp soil, sprouts, a can that follows your hand.
-  const row = Math.floor(GRID_H / 2);
-  const plants: Plant[] = [2, 4, 6, 8, 10].map((cx, i) => ({
-    cx,
-    cy: row + (i % 2 === 0 ? 0 : 1),
+  const count = bedCount(w);
+  const row = Math.max(1, Math.floor(h / 2) - 1);
+  const plants: Plant[] = Array.from({ length: count }, (_, i) => ({
+    cx: Math.round(((i + 1) * w) / (count + 1)),
+    cy: row + (i % 2),
     growth: 0.05,
     rot: 0,
     thirst: 0,
     dead: false,
   }));
 
-  const moisture = new Float32Array(GRID_W * GRID_H);
+  const moisture = new Float32Array(w * h);
   moisture.fill(0.34);
 
   return {
+    w,
+    h,
     moisture,
     plants,
     weeds: [],
@@ -149,19 +165,16 @@ export function createGarden(seed: number): Garden {
 
 /** Water landing at a cell. Most lands on target; the rest wets the neighbours. */
 export function pour(garden: Garden, cx: number, cy: number, amount: number): Garden {
-  if (garden.ending !== null || !inBounds(cx, cy)) return garden;
+  if (garden.ending !== null || !inBounds(garden, cx, cy)) return garden;
   const moisture = Float32Array.from(garden.moisture);
-  moisture[idx(cx, cy)] = Math.min(1, (moisture[idx(cx, cy)] ?? 0) + amount * 0.7);
-  for (const [dx, dy] of [
-    [-1, 0],
-    [1, 0],
-    [0, -1],
-    [0, 1],
-  ] as const) {
+  const here = idx(garden, cx, cy);
+  moisture[here] = Math.min(1, (moisture[here] ?? 0) + amount * 0.7);
+  for (const [dx, dy] of NEIGHBOURS) {
     const x = cx + dx;
     const y = cy + dy;
-    if (!inBounds(x, y)) continue;
-    moisture[idx(x, y)] = Math.min(1, (moisture[idx(x, y)] ?? 0) + amount * 0.075);
+    if (!inBounds(garden, x, y)) continue;
+    const at = idx(garden, x, y);
+    moisture[at] = Math.min(1, (moisture[at] ?? 0) + amount * 0.075);
   }
   return { ...garden, moisture };
 }
@@ -210,25 +223,20 @@ export function step(garden: Garden, dt: number): Garden {
   // Lateral diffusion, then quadratic drainage. Both run before anything
   // drinks, so a pour and its consequences are always one tick apart — that
   // gap is what makes the feedback feel delayed.
-  for (let y = 0; y < GRID_H; y += 1) {
-    for (let x = 0; x < GRID_W; x += 1) {
-      const here = prev[idx(x, y)] ?? 0;
+  for (let y = 0; y < garden.h; y += 1) {
+    for (let x = 0; x < garden.w; x += 1) {
+      const here = prev[idx(garden, x, y)] ?? 0;
       let total = 0;
       let count = 0;
-      for (const [dx, dy] of [
-        [-1, 0],
-        [1, 0],
-        [0, -1],
-        [0, 1],
-      ] as const) {
-        if (!inBounds(x + dx, y + dy)) continue;
-        total += prev[idx(x + dx, y + dy)] ?? 0;
+      for (const [dx, dy] of NEIGHBOURS) {
+        if (!inBounds(garden, x + dx, y + dy)) continue;
+        total += prev[idx(garden, x + dx, y + dy)] ?? 0;
         count += 1;
       }
       const average = count === 0 ? here : total / count;
       const diffused = here + (average - here) * Math.min(1, DIFFUSE_PER_S * dt);
       const drained = diffused - DRAIN_K * diffused * diffused * dt;
-      moisture[idx(x, y)] = Math.max(0, Math.min(1, drained));
+      moisture[idx(garden, x, y)] = Math.max(0, Math.min(1, drained));
     }
   }
 
@@ -239,25 +247,22 @@ export function step(garden: Garden, dt: number): Garden {
 
   for (const weed of weeds) {
     const drink = WEED_DRINK_PER_S * weed.size * dt;
-    for (const [dx, dy] of [
-      [0, 0],
-      [-1, 0],
-      [1, 0],
-      [0, -1],
-      [0, 1],
-    ] as const) {
+    for (const [dx, dy] of [[0, 0] as const, ...NEIGHBOURS]) {
       const x = weed.cx + dx;
       const y = weed.cy + dy;
-      if (!inBounds(x, y)) continue;
-      moisture[idx(x, y)] = Math.max(0, (moisture[idx(x, y)] ?? 0) - drink * 0.4);
+      if (!inBounds(garden, x, y)) continue;
+      const at = idx(garden, x, y);
+      moisture[at] = Math.max(0, (moisture[at] ?? 0) - drink * 0.4);
     }
   }
+
+  const drying: Garden = { ...garden, moisture };
 
   const plants = garden.plants.map((plant) => {
     if (plant.dead) return plant;
 
-    const ring = ringMoisture(moisture, plant.cx, plant.cy);
-    const crown = crownMoisture(moisture, plant.cx, plant.cy);
+    const ring = ringMoisture(drying, plant.cx, plant.cy);
+    const crown = crownMoisture(drying, plant.cx, plant.cy);
 
     // Rot is the monotone. Thirst forgives; saturation does not.
     const rot =
@@ -284,20 +289,20 @@ export function step(garden: Garden, dt: number): Garden {
   let seed = garden.seed;
   let nextWeedAt = garden.nextWeedAt;
   const t = garden.t + dt;
-  const next = { ...garden, moisture, plants, weeds, t, seed, nextWeedAt, ending: null };
 
   if (t >= nextWeedAt) {
     const [rx, s1] = nextRandom(seed);
     const [ry, s2] = nextRandom(s1);
     seed = s2;
     nextWeedAt = t + WEED_INTERVAL_S;
-    const cx = Math.floor(rx * GRID_W);
-    const cy = Math.floor(ry * GRID_H);
-    if (!occupied(next, cx, cy)) weeds = [...weeds, { cx, cy, size: 0.1 }];
+    const cx = Math.floor(rx * garden.w);
+    const cy = Math.floor(ry * garden.h);
+    const probe: Garden = { ...drying, plants, weeds };
+    if (!occupied(probe, cx, cy)) weeds = [...weeds, { cx, cy, size: 0.1 }];
   }
 
   const alive = plants.some((plant) => !plant.dead);
   const ending: Ending | null = !alive ? "barren" : t >= SEASON_S ? "frost" : null;
 
-  return { ...next, weeds, seed, nextWeedAt, ending };
+  return { ...garden, moisture, plants, weeds, t, seed, nextWeedAt, ending };
 }

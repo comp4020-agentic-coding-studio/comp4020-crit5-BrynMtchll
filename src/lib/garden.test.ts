@@ -5,7 +5,6 @@ import {
   createGarden,
   crownMoisture,
   type Garden,
-  GRID_W,
   idx,
   POUR_PER_S,
   pour,
@@ -34,10 +33,10 @@ const water = (cx: number, cy: number) => (g: Garden) =>
 describe("soil", () => {
   it("only ever loses water on its own", () => {
     let garden = createGarden(1);
-    let previous = garden.moisture[idx(3, 3)] ?? 0;
+    let previous = garden.moisture[idx(garden, 3, 3)] ?? 0;
     for (let i = 0; i < 200; i += 1) {
       garden = step(garden, DT);
-      const now = garden.moisture[idx(3, 3)] ?? 0;
+      const now = garden.moisture[idx(garden, 3, 3)] ?? 0;
       expect(now).toBeLessThanOrEqual(previous + 1e-6);
       previous = now;
     }
@@ -49,9 +48,9 @@ describe("soil", () => {
     const drop = (start: number) => {
       let garden = createGarden(1);
       const moisture = Float32Array.from(garden.moisture);
-      moisture[idx(0, 0)] = start;
+      moisture[idx(garden, 0, 0)] = start;
       garden = { ...garden, moisture };
-      const after = step(garden, DT).moisture[idx(0, 0)] ?? 0;
+      const after = step(garden, DT).moisture[idx(garden, 0, 0)] ?? 0;
       return start - after;
     };
     expect(drop(0.95)).toBeGreaterThan(drop(0.35) * 3);
@@ -82,7 +81,7 @@ describe("the hidden rule: roots drink from the ring, only the crown rots", () =
     const drowned = after.plants[0];
     if (!drowned) throw new Error("expected the plant to persist");
 
-    expect(crownMoisture(after.moisture, plant.cx, plant.cy)).toBeGreaterThan(CROWN_ROT);
+    expect(crownMoisture(after, plant.cx, plant.cy)).toBeGreaterThan(CROWN_ROT);
     expect(drowned.dead).toBe(true);
   });
 
@@ -90,11 +89,11 @@ describe("the hidden rule: roots drink from the ring, only the crown rots", () =
     let garden = createGarden(1);
     const moisture = Float32Array.from(garden.moisture);
     moisture.fill(0);
-    moisture[idx(5, 5)] = 1;
+    moisture[idx(garden, 5, 5)] = 1;
     garden = { ...garden, moisture };
 
-    expect(ringMoisture(garden.moisture, 5, 5)).toBe(0);
-    expect(crownMoisture(garden.moisture, 5, 5)).toBe(1);
+    expect(ringMoisture(garden, 5, 5)).toBe(0);
+    expect(crownMoisture(garden, 5, 5)).toBe(1);
   });
 });
 
@@ -166,7 +165,7 @@ describe("weeds", () => {
 
     const seeded: Garden = {
       ...garden,
-      weeds: [{ cx: (plant.cx + 5) % GRID_W, cy: plant.cy, size: 1 }],
+      weeds: [{ cx: (plant.cx + 5) % garden.w, cy: plant.cy, size: 1 }],
     };
     expect(pull(seeded, 0).plants[0]?.rot ?? 0).toBe(0);
   });
@@ -218,7 +217,7 @@ describe("stages", () => {
     const garden = createGarden(1);
     const dry = { ...garden, moisture: new Float32Array(garden.moisture.length) };
     const after = run(dry, 5);
-    expect(ringMoisture(after.moisture, 2, 4)).toBeLessThan(BAND_MIN);
+    expect(ringMoisture(after, 2, 4)).toBeLessThan(BAND_MIN);
     expect(after.plants[0]?.growth).toBe(garden.plants[0]?.growth);
   });
 });

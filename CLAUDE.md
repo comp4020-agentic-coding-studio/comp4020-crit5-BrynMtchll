@@ -1,5 +1,4 @@
 # COMP4020 prototype
-
 This is your COMP4020 prototype: a static site (this week built with Astro, see
 "The stack is swappable" below) that builds to plain HTML/CSS/JS and deploys to
 GitHub Pages. The **deployed site is what gets marked** --- not this repo, and not "it
@@ -14,6 +13,14 @@ and this repo's name tells you which deliverable it is. Run the course plugin's
 course API, carries your harness forward from last week, and helps you turn the
 spec's checkable lines into tests of your own. Read the spec before you build,
 and see `spec/README.md` for how the checks in this repo relate to it.
+
+## Additions
+- Be terse, skip long explanations unless asked
+- Flag trade-offs briefly rather than writing essays
+- Tell me directly if a request conflicts with an earlier constraint
+- Don't ask for permissions for standard commands and testing
+- when askekd to come up with ideas, think deeply and explore a wide array of inspirations  in order to come up with novel and interesting ideas
+
 
 ## How to work in here
 

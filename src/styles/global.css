@@ -1,13 +1,71 @@
+:root {
+  --ink: #3d4a3f;
+  --ground: #e8eee2;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 body {
+  display: flex;
+  flex-direction: column;
+
+  /* dvh, not vh: the phone viewport this is marked at hides part of a vh
+     behind the browser chrome, which would push the can off the bottom. */
+  height: 100dvh;
   margin: 0;
+  overflow: hidden;
   font-family: system-ui, sans-serif;
-  line-height: 1.6;
+  color: var(--ink);
+  background: var(--ground);
 }
 
 header {
-  padding: 0.75rem 1.25rem;
+  padding: 0.6rem 1rem 0;
+}
+
+nav a {
+  font-size: 0.7rem;
+  color: var(--ink);
+  text-decoration: none;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  opacity: 0.35;
+}
+
+nav a:hover,
+nav a:focus-visible {
+  opacity: 0.7;
 }
 
 main {
-  padding: 0 1.25rem 2rem;
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  padding: 0 0.5rem 0.5rem;
+}
+
+/* The title names the game and nothing else. Every rule the player needs is in
+   the picture; if a word here explained anything, the brief would be broken. */
+h1 {
+  margin: 0.1rem 0 0.4rem;
+  font-size: 0.95rem;
+  font-weight: 500;
+  letter-spacing: 0.24em;
+  text-transform: lowercase;
+  opacity: 0.4;
+}
+
+canvas {
+  display: block;
+  flex: 1;
+  width: 100%;
+  min-height: 0;
+
+  /* The can is the cursor. A second one hovering over it reads as a UI. */
+  cursor: none;
+  border-radius: 10px;
+  touch-action: none;
 }
