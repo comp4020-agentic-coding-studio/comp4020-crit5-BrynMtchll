@@ -51,7 +51,26 @@ jobs:
         # passes having scanned zero links. The stack skill rewrites the
         # command below when it converts the repo to Astro, and carries the
         # same skip over, so this comment holds either way.
-        run: pnpm dlx linkinator ./dist --silent --skip "^https?://(?!localhost|127)"
+        #
+        # Rewritten for Astro, as the note above anticipated. Crawling ./dist as
+        # a filesystem root cannot pass once astro.config sets `base` for a
+        # Pages project site: every internal URL then carries the /<repo>/
+        # prefix, which exists only when a server adds it, so a correct build
+        # reports its own script tag as a broken link. Serving the build and
+        # crawling that is also the stronger check --- it exercises the base
+        # resolution the deployed site actually depends on.
+        run: |
+          pnpm exec astro preview --port 4321 &
+          base="http://localhost:4321/${{ github.event.repository.name }}/"
+          for _ in $(seq 1 30); do
+            curl -sf -o /dev/null "$base" && break
+            sleep 1
+          done
+          curl -sf -o /dev/null "$base" || {
+            echo "preview server never came up at $base"; exit 1;
+          }
+          pnpm dlx linkinator "$base" --silent --recurse \
+            --skip "^https?://(?!localhost|127)"
       - name: Scan for committed secrets
         # Pinned, both halves: the SHA fixes the action's script, and `version`
         # fixes the scanner image, which otherwise floats on :latest. These two
