@@ -45,8 +45,13 @@ problems with mise.
 ## What's here
 
 - `src/pages/index.astro`, `src/styles/` --- the page and its CSS.
-- `src/lib/garden.ts` --- the simulation core: DOM-free, clock-free, deterministic.
-- `src/game/` --- the canvas layer: can physics, layout, drawing, the loop.
+- `src/lib/garden.ts` --- the simulation core: DOM-free, clock-free,
+  deterministic, and where every rule that can lose you the game lives.
+  `species.ts` is the five natives as pure data; the rules never branch on them.
+- `src/three/` --- the rendered bed. `scene.ts` (camera, light, air),
+  `ground.ts` (soil, moisture, holes), `plants.ts` and `props.ts` (procedural
+  natives, weeds, water), `tools.ts` (the bench), `textures.ts`, and `main.ts`
+  (the loop, and pointer hits turned into verbs).
 - `mise.toml` --- the tested Node and pnpm versions for this template.
 - `spec/` --- what the checks are for (`README.md`) and the shipped invariants
   (`invariants.test.ts`); the spec tests you write live alongside them.
