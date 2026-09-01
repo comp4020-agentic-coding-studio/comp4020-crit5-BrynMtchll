@@ -11,6 +11,7 @@ import {
   Group,
   LatheGeometry,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   Object3D,
   SphereGeometry,
@@ -19,12 +20,20 @@ import {
 } from "three";
 import { SPECIES, type SpeciesId } from "../lib/species";
 import { BED_D, BED_W } from "./ground";
+import type { Edge } from "./scene";
 
 export type ToolId = "trowel" | "can" | `seed:${SpeciesId}`;
 
 export interface Tool {
   readonly id: ToolId;
   readonly object: Object3D;
+  /**
+   * The slot on the board, and the thing the pointer actually hits. A trowel
+   * handle is a few pixels wide on a phone; the slot is a whole finger. It
+   * stays on the board when the tool is in your hand, so pressing the empty
+   * slot is how you put the tool back.
+   */
+  readonly pad: Mesh;
   /** Where it rests on the board when it isn't in your hand. */
   readonly home: { x: number; y: number; z: number };
 }
@@ -122,47 +131,87 @@ function buildSeed(colour: number, radius: number): Object3D {
 
 export interface Bench {
   readonly group: Group;
+  readonly board: Mesh;
   readonly tools: readonly Tool[];
 }
+
+/** Y of the board's surface, and Z of the whole bench. */
+export const BENCH_Y = 0.055;
+export const BENCH_Z = BED_D / 2 + 0.24;
+const BENCH_DEPTH = 0.34;
+
+// Invisible but raycastable: `visible = false` would be skipped by the
+// raycaster, and a zero-opacity material still reports intersections.
+const HIT = new MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false });
 
 /** The board and everything on it, along the near edge of the bed. */
 export function createBench(): Bench {
   const group = new Group();
 
-  const z = BED_D / 2 + 0.24;
-  const board = new Mesh(new BoxGeometry(BED_W + 0.42, 0.05, 0.34), WOOD);
-  board.position.set(0, 0.03, z);
+  const board = new Mesh(new BoxGeometry(1, 0.05, BENCH_DEPTH), WOOD);
+  board.position.set(0, 0.03, BENCH_Z);
   board.receiveShadow = true;
   board.castShadow = true;
   group.add(board);
 
   const tools: Tool[] = [];
-  const surface = 0.055;
 
   const trowel = buildTrowel();
-  const trowelHome = { x: -BED_W / 2 + 0.12, y: surface, z };
   trowel.rotation.x = -Math.PI / 2;
   trowel.rotation.z = 0.35;
-  tools.push({ id: "trowel", object: trowel, home: trowelHome });
+  tools.push(slot("trowel", trowel));
 
-  const can = buildCan();
-  const canHome = { x: BED_W / 2 - 0.06, y: surface, z };
-  tools.push({ id: "can", object: can, home: canHome });
+  tools.push(slot("can", buildCan()));
 
-  SPECIES.forEach((species, i) => {
-    const spread = (i - (SPECIES.length - 1) / 2) * 0.19;
-    const seed = buildSeed(species.seed.colour, species.seed.radius);
-    tools.push({
-      id: `seed:${species.id}`,
-      object: seed,
-      home: { x: spread, y: surface, z },
-    });
-  });
-
-  for (const tool of tools) {
-    tool.object.position.set(tool.home.x, tool.home.y, tool.home.z);
-    group.add(tool.object);
+  for (const species of SPECIES) {
+    tools.push(slot(`seed:${species.id}`, buildSeed(species.seed.colour, species.seed.radius)));
   }
 
-  return { group, tools };
+  function slot(id: ToolId, object: Object3D): Tool {
+    const pad = new Mesh(new BoxGeometry(1, 0.3, BENCH_DEPTH), HIT);
+    return { id, object, pad, home: { x: 0, y: BENCH_Y, z: BENCH_Z } };
+  }
+
+  for (const tool of tools) group.add(tool.object, tool.pad);
+
+  return { group, board, tools };
+}
+
+/**
+ * Lay the bench out inside the width the camera actually shows. Written in
+ * metres against the live frustum rather than as fixed world positions,
+ * because a portrait frame sees barely half the bed's width: the same
+ * hand-placed bench that reads well at 1920x1080 put the trowel 162px off the
+ * left edge of a 390px screen, where it cannot be picked up at all.
+ */
+export function layoutBench(bench: Bench, halfWidth: number, edge: Edge): void {
+  // Swing the whole board round to whichever edge the player is standing at.
+  // Everything on it is laid out in the board's own frame, so the tools follow.
+  bench.group.rotation.y = edge === "long" ? 0 : Math.PI / 2;
+  bench.group.position.x = edge === "long" ? 0 : (BED_W - BED_D) / 2;
+
+  const span = edge === "long" ? BED_W : BED_D;
+  const half = Math.min(span / 2 + 0.21, Math.max(0.45, halfWidth - 0.06));
+  const count = bench.tools.length;
+  const slotWidth = (half * 2) / count;
+
+  bench.board.scale.x = half * 2 + 0.06;
+
+  bench.tools.forEach((tool, i) => {
+    tool.home.x = -half + slotWidth * (i + 0.5);
+    tool.object.position.set(tool.home.x, tool.home.y, tool.home.z);
+    // Objects grow with their slot, so a seed dish stays a pressable fraction
+    // of the screen instead of a speck at one viewport and a boulder at another.
+    // Never larger than modelled: scaled up to fill a wide slot, a watering can
+    // took a fifth of the desktop frame.
+    const scale = Math.min(1, Math.max(0.8, slotWidth / 0.31));
+    tool.object.scale.setScalar(scale);
+    // How tall the slot's hit box stands depends on how steeply you're looking
+    // at it. Seen nearly edge-on from the long side it needs height to be worth
+    // pressing; seen from above on a phone, that same height reaches out over
+    // the nearest row of soil and swallows presses meant for the bed.
+    const padHeight = edge === "long" ? 0.17 : 0.04;
+    tool.pad.scale.set(slotWidth, padHeight / 0.3, 1);
+    tool.pad.position.set(tool.home.x, 0.03 + padHeight / 2, tool.home.z);
+  });
 }

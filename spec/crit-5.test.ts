@@ -3,16 +3,21 @@ import { join, resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
 import {
+  BAND_MAX,
   createGarden,
   dig,
   DIG_PER_S,
   type Garden,
   POUR_PER_S,
   pour,
+  pull,
+  ringMoisture,
   SEASON_S,
   sow,
+  stageOf,
   step,
 } from "../src/lib/garden";
+import { SPECIES } from "../src/lib/species";
 
 const DT = 1 / 60;
 
@@ -166,6 +171,80 @@ describe("crit 5 spec: a game", () => {
 describe("sensors: standards I hold the work to, whatever the brief is", () => {
   // These outlive crit 5 and come forward into next week's repo — see
   // spec/README.md on contract tests versus sensors.
+
+  it("can be won by playing it well, not just lost by playing it badly", () => {
+    // The sensor this repo most needed and did not have. Every rule test below
+    // asserts the *shape* of a rule — a saturated cell sheds faster than a damp
+    // one, rot never falls — and all of them stayed green through a tuning pass
+    // that left the game unwinnable however well it was played. A suite that can
+    // only prove a game is losable is not measuring a game.
+    //
+    // Calibrated: it fails at DRAIN_K >= 0.6, where a bed dries out faster than
+    // a player on a rota can get back to it. Which constant is the unplayable
+    // one is not fixed — 0.38 shipped as unplayable against a shorter season and
+    // slower growth, and survives against today's. That is the point of holding
+    // the outcome rather than the number.
+    //
+    // So: play it competently. Three beds, water whichever is driest and only
+    // while it is below band, pull weeds while they are small. That is the
+    // strategy the hidden rule rewards, and it has to reach frost with a
+    // flourishing garden or the game is not winnable and the tests are lying.
+    const dt = 1 / 60;
+    // One of each species, which is what five seed dishes on the bench invite a
+    // player to do — and five beds on one can is the load the drainage constant
+    // was quietly failing.
+    const beds: [number, number][] = [
+      [1, 3],
+      [3, 3],
+      [5, 3],
+      [7, 3],
+      [9, 3],
+    ];
+
+    let garden = createGarden(4);
+    beds.forEach(([cx, cy], i) => {
+      for (let k = 0; k < 60; k += 1) garden = dig(garden, cx, cy, DIG_PER_S * dt);
+      garden = sow(garden, cx, cy, SPECIES[i]?.id ?? "wattle");
+    });
+
+    // One can, and it can only be in one place. The first attempt at this
+    // sensor let the strategy pour on whichever bed was driest every single
+    // tick, and it passed at the broken drainage constant too — an oracle with
+    // no travel time can keep up with any leak. What made the game unplayable
+    // was physical: you carry the can to a bed, water it for a moment, and
+    // carry it to the next, and the others dry out while you do. So the
+    // strategy is put on a rota with a real gap in it.
+    const DWELL_S = 1.2;
+    const TRAVEL_S = 0.5;
+    const ROUND_S = DWELL_S + TRAVEL_S;
+
+    for (let elapsed = 0; elapsed < SEASON_S + 2 && garden.ending === null; elapsed += dt) {
+      const turn = Math.floor(elapsed / ROUND_S) % beds.length;
+      const into = elapsed % ROUND_S;
+      const bed = beds[turn];
+      // Watering only while standing at the bed, and stopping once the soil
+      // there has darkened past the band — that much a player can see.
+      if (bed && into < DWELL_S && ringMoisture(garden, bed[0], bed[1]) < BAND_MAX * 0.8) {
+        garden = pour(garden, bed[0] - 1, bed[1], POUR_PER_S * dt);
+      }
+
+      // Weeds cost less to pull the sooner you get to them.
+      const young = garden.weeds.findIndex((weed) => weed.size > 0.05 && weed.size < 0.3);
+      if (young >= 0) garden = pull(garden, young);
+
+      garden = step(garden, dt);
+    }
+
+    expect(garden.ending, "a well-played season should reach frost").toBe("frost");
+    expect(
+      garden.plants.filter((plant) => plant.dead),
+      "nothing should die under competent care",
+    ).toEqual([]);
+    expect(
+      garden.plants.some((plant) => stageOf(plant) === "bloom"),
+      "and something should have flowered — that is the whole of the winning",
+    ).toBe(true);
+  });
 
   it("simulates on a fixed timestep, independent of frame rate", () => {
     // Tie a simulation to the frame rate and the same watering kills a plant

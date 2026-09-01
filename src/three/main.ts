@@ -28,10 +28,10 @@ import {
   weedAt,
 } from "../lib/garden";
 import type { SpeciesId } from "../lib/species";
-import { cellToWorld, createGround, worldToCell } from "./ground";
+import { BED_W, cellToWorld, createGround, worldToCell } from "./ground";
 import { buildPlant } from "./plants";
 import { createStage } from "./scene";
-import { createBench, type Tool, type ToolId } from "./tools";
+import { BENCH_Y, BENCH_Z, createBench, layoutBench, type Tool, type ToolId } from "./tools";
 import { buildWeed, createWater } from "./props";
 
 const FIXED_DT = 1 / 60;
@@ -52,6 +52,8 @@ export function start(canvas: HTMLCanvasElement): void {
 
   const bench = createBench();
   stage.scene.add(bench.group);
+  let benchWidth = 0;
+  let benchEdge = "";
 
   const plantLayer = new Group();
   const weedLayer = new Group();
@@ -85,8 +87,11 @@ export function start(canvas: HTMLCanvasElement): void {
   marker.visible = false;
   stage.scene.add(marker);
 
+  // The slots, not the tool meshes. Raycasting the meshes meant the tool in
+  // your hand — drawn right under the cursor — intercepted presses meant for
+  // the soil, and turned a dig into a fumbled put-down.
   function pickables(): Object3D[] {
-    return [ground.mesh, ...bench.tools.map((t) => t.object)];
+    return [ground.mesh, ...bench.tools.map((t) => t.pad)];
   }
 
   function hit(): { point: Vector3; object: Object3D } | null {
@@ -98,14 +103,7 @@ export function start(canvas: HTMLCanvasElement): void {
   }
 
   function toolFor(object: Object3D): Tool | null {
-    for (const tool of bench.tools) {
-      let node: Object3D | null = object;
-      while (node) {
-        if (node === tool.object) return tool;
-        node = node.parent;
-      }
-    }
-    return null;
+    return bench.tools.find((tool) => tool.pad === object) ?? null;
   }
 
   function restart(): void {
@@ -129,7 +127,14 @@ export function start(canvas: HTMLCanvasElement): void {
   });
 
   canvas.addEventListener("pointerdown", (event) => {
-    canvas.setPointerCapture(event.pointerId);
+    // Capture keeps a drag alive if the finger slides off the canvas, but it
+    // throws on a pointer id the browser doesn't know — and an exception here
+    // would take the whole press with it, tool and all.
+    try {
+      canvas.setPointerCapture(event.pointerId);
+    } catch {
+      /* not fatal: the press below is what matters */
+    }
     const rect = canvas.getBoundingClientRect();
     pointer.set(
       ((event.clientX - rect.left) / rect.width) * 2 - 1,
@@ -265,6 +270,9 @@ export function start(canvas: HTMLCanvasElement): void {
     held.pos.add(held.vel.clone().multiplyScalar(dt));
 
     if (garden.ending !== null) {
+      // Put the tool down when the season closes: the last frame should be the
+      // garden you ended up with, not a watering can hanging over it.
+      holding = null;
       endingFade = Math.min(1, endingFade + dt * 1.2);
     } else if (acting) {
       const point = target?.point;
@@ -289,7 +297,19 @@ export function start(canvas: HTMLCanvasElement): void {
 
     const width = canvas.clientWidth;
     const height = canvas.clientHeight;
-    if (width > 0 && height > 0) stage.resize(width, height);
+    if (width > 0 && height > 0) {
+      stage.resize(width, height);
+      const centre =
+        stage.view.edge === "long"
+          ? new Vector3(0, BENCH_Y, BENCH_Z)
+          : new Vector3(BED_W / 2 + 0.24, BENCH_Y, 0);
+      const half = stage.visibleHalfWidthAt(centre);
+      if (Math.abs(half - benchWidth) > 0.001 || benchEdge !== stage.view.edge) {
+        benchWidth = half;
+        benchEdge = stage.view.edge;
+        layoutBench(bench, half, stage.view.edge);
+      }
+    }
 
     stage.setSeason(garden.t / SEASON_S);
     ground.update(garden);
@@ -299,8 +319,20 @@ export function start(canvas: HTMLCanvasElement): void {
     // The held tool rides in your hand; everything else stays on the bench.
     for (const tool of bench.tools) {
       if (holding?.id === tool.id) {
-        tool.object.position.set(held.pos.x, held.pos.y + 0.16, held.pos.z + 0.04);
-        tool.object.rotation.z = Math.max(-0.9, Math.min(0.9, -held.vel.x * 0.06));
+        // The tools live on the board, and the board swings round to whichever
+        // edge you're standing at — so the hand position, which is in world
+        // space, has to come back into the board's frame or the held tool flies
+        // off sideways.
+        const towardsPlayer = stage.view.edge === "long" ? [0, 0.04] : [0.04, 0];
+        const at = new Vector3(
+          held.pos.x + (towardsPlayer[0] ?? 0),
+          held.pos.y + 0.16,
+          held.pos.z + (towardsPlayer[1] ?? 0),
+        );
+        tool.object.position.copy(bench.group.worldToLocal(at));
+        // Sideways, as the player sees it: across the frame, not across the bed.
+        const sway = stage.view.edge === "long" ? held.vel.x : held.vel.z;
+        tool.object.rotation.z = Math.max(-0.9, Math.min(0.9, -sway * 0.06));
       } else {
         tool.object.position.set(tool.home.x, tool.home.y, tool.home.z);
         tool.object.rotation.z = tool.id === "trowel" ? 0.35 : 0;
@@ -337,6 +369,18 @@ export function start(canvas: HTMLCanvasElement): void {
   // guessed at. Stripped from the production bundle by the `import.meta.env.DEV`
   // branch, so it never ships.
   if (import.meta.env.DEV) {
+    // Page coordinates, not canvas coordinates. The canvas sits below a header,
+    // so a probe that reported canvas-relative pixels sent every scripted press
+    // ~55px high — which only showed up once the hit targets got small enough
+    // to miss.
+    const onPage = (v: Vector3): [number, number] => {
+      const rect = canvas.getBoundingClientRect();
+      const p = v.clone().project(stage.camera);
+      return [
+        Math.round(rect.left + ((p.x + 1) / 2) * rect.width),
+        Math.round(rect.top + ((1 - p.y) / 2) * rect.height),
+      ];
+    };
     Object.assign(globalThis, {
       __beside: () => ({
         holding: holding?.id ?? null,
@@ -377,30 +421,38 @@ export function start(canvas: HTMLCanvasElement): void {
             // Where that cell lands on screen, so a screenshot can be sampled.
             screen: (() => {
               const at = cellToWorld(garden, cx, cy);
-              const v3 = new Vector3(at.x, 0, at.z).project(stage.camera);
-              return [
-                Math.round(((v3.x + 1) / 2) * canvas.clientWidth),
-                Math.round(((1 - v3.y) / 2) * canvas.clientHeight),
-              ];
+              return onPage(new Vector3(at.x, 0, at.z));
             })(),
+          };
+        })(),
+        // Where the bed's four corners land, so "does it fit" is measured
+        // rather than eyeballed.
+        frame: (() => {
+          const to = (x: number, z: number) => onPage(new Vector3(x, 0, z));
+          const a = cellToWorld(garden, 0, 0);
+          const b = cellToWorld(garden, garden.w - 1, garden.h - 1);
+          return {
+            view: [canvas.clientWidth, canvas.clientHeight],
+            farLeft: to(a.x, b.z),
+            farRight: to(b.x, b.z),
+            nearLeft: to(a.x, a.z),
+            nearRight: to(b.x, a.z),
           };
         })(),
         // Screen positions of the bench items, so a test can press them
         // without hunting pixels.
         at: Object.fromEntries(
-          bench.tools.map((tool) => {
-            const v = new Vector3().setFromMatrixPosition(tool.object.matrixWorld).project(
-              stage.camera,
-            );
-            return [
-              tool.id,
-              [
-                Math.round(((v.x + 1) / 2) * canvas.clientWidth),
-                Math.round(((1 - v.y) / 2) * canvas.clientHeight),
-              ],
-            ];
-          }),
+          bench.tools.map((tool) => [
+            tool.id,
+            onPage(new Vector3().setFromMatrixPosition(tool.pad.matrixWorld)),
+          ]),
         ),
+        // Any cell's centre in page pixels, so a scripted press can aim at a
+        // cell rather than at a guess.
+        cell: (cx: number, cy: number) => {
+          const at = cellToWorld(garden, cx, cy);
+          return onPage(new Vector3(at.x, 0, at.z));
+        },
       }),
     });
   }

@@ -34,8 +34,22 @@ function leafMaterial(colour: number, rot: number, dead: boolean): MeshStandardM
   return material;
 }
 
+// One geometry per distinct blade size, shared across every leaf that wants it.
+// A fuller shrub is two dozen blades; building a lathe per leaf per rebuild made
+// the garden a garbage-collection problem instead of a rendering one.
+const blades = new Map<string, BufferGeometry>();
+
 /** A tapered blade, used for strap leaves and phyllodes. */
 function blade(length: number, width: number): BufferGeometry {
+  const key = `${length.toFixed(3)}:${width.toFixed(4)}`;
+  const cached = blades.get(key);
+  if (cached) return cached;
+  const made = buildBlade(length, width);
+  blades.set(key, made);
+  return made;
+}
+
+function buildBlade(length: number, width: number): BufferGeometry {
   return new LatheGeometry(
     [
       new Vector2(0.0001, 0),
@@ -80,9 +94,11 @@ export function buildPlant(plant: Plant): Object3D {
 
   const grown = Math.min(1, plant.growth);
   const h = species.height * (0.18 + grown * 0.82);
-  // Thirst leans the whole plant over; death folds it to the ground. One
-  // variable each, the same as the postures the 2D version used.
-  const lean = dead ? 1.15 : plant.thirst * 0.7;
+  // Thirst leans the plant over; death bows it further and draws it in. Folded
+  // all the way to 1.15rad it lay flat on its own soil and read as a bug in the
+  // renderer rather than as a plant that had died — a collapsed silhouette that
+  // is still plant-shaped says it better.
+  const lean = dead ? 0.72 : plant.thirst * 0.7;
   const fat = 1 + plant.rot * 0.5;
 
   const foliageGroup = new Group();
@@ -91,9 +107,9 @@ export function buildPlant(plant: Plant): Object3D {
   switch (species.form) {
     case "strap": {
       // Kangaroo paw: a fan of strap leaves from the base, flower stems above.
-      const count = 5 + Math.round(grown * 3);
+      const count = 9 + Math.round(grown * 5);
       for (let i = 0; i < count; i += 1) {
-        const leaf = new Mesh(blade(h * 0.72, 0.016 * fat), foliage);
+        const leaf = new Mesh(blade(h * 0.72, 0.019 * fat), foliage);
         leaf.rotation.z = (i / count - 0.5) * 0.9;
         leaf.rotation.y = (i / count) * Math.PI * 1.6;
         leaf.castShadow = true;
@@ -116,22 +132,24 @@ export function buildPlant(plant: Plant): Object3D {
     }
     case "spike": {
       // Banksia: upright, woody, with the candle at the top.
-      addStem(foliageGroup, h * 0.8, 0.014 * fat, woody);
-      const leaves = 6 + Math.round(grown * 5);
+      addStem(foliageGroup, h * 0.86, 0.013 * fat, woody);
+      const leaves = 13 + Math.round(grown * 8);
       for (let i = 0; i < leaves; i += 1) {
-        const leaf = new Mesh(blade(h * 0.3, 0.013), foliage);
+        const leaf = new Mesh(blade(h * 0.27, 0.016), foliage);
         leaf.position.y = h * (0.25 + (i / leaves) * 0.5);
-        leaf.rotation.z = i % 2 === 0 ? 1.1 : -1.1;
-        leaf.rotation.y = (i / leaves) * Math.PI * 2;
+        leaf.rotation.z = (i % 2 === 0 ? 1.1 : -1.1) + ((i % 3) - 1) * 0.13;
+        leaf.rotation.y = (i / leaves) * Math.PI * 2 * 2.4;
         leaf.castShadow = true;
         foliageGroup.add(leaf);
       }
       if (stage === "bloom" || stage === "bud") {
+        // Sits on top of the stem, not above it. At h*0.075 radius it read as
+        // a fence post balanced over the plant rather than a flower spike.
         const candle = new Mesh(
-          new CylinderGeometry(h * 0.075, h * 0.06, h * 0.28, 10),
+          new CylinderGeometry(h * 0.045, h * 0.038, h * 0.2, 12),
           stage === "bloom" ? flower : woody,
         );
-        candle.position.y = h * 0.92;
+        candle.position.y = h * 0.93;
         candle.castShadow = true;
         foliageGroup.add(candle);
       }
@@ -140,9 +158,9 @@ export function buildPlant(plant: Plant): Object3D {
     case "brush": {
       // Bottlebrush: weeping fine foliage, cylindrical brush of stamens.
       addStem(foliageGroup, h * 0.85, 0.011 * fat, woody);
-      const sprigs = 7 + Math.round(grown * 5);
+      const sprigs = 15 + Math.round(grown * 9);
       for (let i = 0; i < sprigs; i += 1) {
-        const leaf = new Mesh(blade(h * 0.26, 0.006), foliage);
+        const leaf = new Mesh(blade(h * 0.26, 0.0085), foliage);
         leaf.position.y = h * (0.3 + (i / sprigs) * 0.5);
         leaf.rotation.z = 2.5;
         leaf.rotation.y = (i / sprigs) * Math.PI * 2.4;
@@ -167,9 +185,9 @@ export function buildPlant(plant: Plant): Object3D {
     }
     case "fine": {
       // Grevillea: low and wide, divided foliage, spider flowers.
-      const arms = 8 + Math.round(grown * 6);
+      const arms = 15 + Math.round(grown * 9);
       for (let i = 0; i < arms; i += 1) {
-        const arm = new Mesh(blade(h * 0.55, 0.007 * fat), foliage);
+        const arm = new Mesh(blade(h * 0.55, 0.0095 * fat), foliage);
         arm.rotation.z = 0.75 + (i % 3) * 0.2;
         arm.rotation.y = (i / arms) * Math.PI * 2;
         arm.castShadow = true;
@@ -196,12 +214,12 @@ export function buildPlant(plant: Plant): Object3D {
     case "phyllode": {
       // Wattle: upright phyllodes, then a scatter of golden puffballs.
       addStem(foliageGroup, h * 0.7, 0.01 * fat, woody);
-      const leaves = 9 + Math.round(grown * 7);
+      const leaves = 17 + Math.round(grown * 10);
       for (let i = 0; i < leaves; i += 1) {
-        const leaf = new Mesh(blade(h * 0.32, 0.009), foliage);
+        const leaf = new Mesh(blade(h * 0.32, 0.0115), foliage);
         leaf.position.y = h * (0.18 + (i / leaves) * 0.55);
-        leaf.rotation.z = i % 2 === 0 ? 0.8 : -0.8;
-        leaf.rotation.y = (i / leaves) * Math.PI * 2.7;
+        leaf.rotation.z = (i % 2 === 0 ? 0.8 : -0.8) + ((i % 3) - 1) * 0.15;
+        leaf.rotation.y = (i / leaves) * Math.PI * 2.7 * 1.6;
         leaf.castShadow = true;
         foliageGroup.add(leaf);
       }
@@ -223,5 +241,6 @@ export function buildPlant(plant: Plant): Object3D {
   }
 
   foliageGroup.rotation.z = lean;
+  if (dead) foliageGroup.scale.set(0.88, 0.72, 0.88);
   return group;
 }

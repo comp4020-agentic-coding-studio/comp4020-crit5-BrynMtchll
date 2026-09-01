@@ -17,6 +17,7 @@ import {
   PCFShadowMap,
   Scene,
   SRGBColorSpace,
+  Vector3,
   WebGLRenderer,
 } from "three";
 import { BED_D, BED_W } from "./ground";
@@ -27,9 +28,22 @@ export interface Stage {
   readonly camera: PerspectiveCamera;
   readonly sun: DirectionalLight;
   resize(width: number, height: number): void;
+  /** Half the width the frustum actually shows at a point in the world. */
+  visibleHalfWidthAt(point: Vector3): number;
+  /** Which edge of the bed the player is standing at, chosen by the viewport. */
+  readonly view: { edge: Edge };
   /** 0..1 through the season: moves the sun and cools the light. */
   setSeason(t: number): void;
 }
+
+/**
+ * The bed is wider than it is deep, so which edge you stand at decides whether
+ * it fits the frame. On a wide screen you stand at the long side, as you would
+ * at a raised bed. On a phone that same view crops a 2.6m bed to a strip, so
+ * you stand at the short end and look down its length instead — the same bed,
+ * the same rules, a footprint that matches the frame.
+ */
+export type Edge = "long" | "short";
 
 export function createStage(canvas: HTMLCanvasElement): Stage {
   const renderer = new WebGLRenderer({ canvas, antialias: true, alpha: false });
@@ -44,14 +58,42 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
 
   const scene = new Scene();
   scene.background = new Color(0x9dbdd6);
-  scene.fog = new Fog(0x9dbdd6, 2.6, 9.5);
+  // Two jobs, and they pull against each other: the fog has to start beyond the
+  // bed's far corner (~4.4m from either standing position) so the plot is never
+  // hazy, and it has to finish soon after, or the surrounding ground stays
+  // legible all the way to a hard horizon. Pulled in to 2.6m the far half of the
+  // plot read as gloom; pushed out to 20m there was no sky at all.
+  scene.fog = new Fog(0x9dbdd6, 5, 9.5);
 
   const camera = new PerspectiveCamera(52, 1, 0.05, 60);
   // Standing at the near edge, looking down into the bed. Far enough back
   // that the bench and the whole plot are in one frame, which they have to be:
   // a tool you can't see is a tool nobody will pick up.
-  camera.position.set(0, 1.62, BED_D / 2 + 1.3);
-  camera.lookAt(0, 0.02, -0.05);
+  const AIM = new Vector3(0, 0.02, 0);
+  const AIM_LONG = new Vector3(0, 0.02, -0.05);
+  const view: { edge: Edge } = { edge: "long" };
+
+  // What the frame has to contain, whatever the viewport: the bed with a
+  // margin, the top of a grown shrub at the far row, and the outer edge of the
+  // bench. The FOV is solved from these rather than picked by hand — a
+  // hand-picked FOV was right at 1920x1080 and cropped the bed at 390x844,
+  // which is half the mark.
+  function fitPoints(edge: Edge): Vector3[] {
+    const x = BED_W / 2 + 0.1;
+    const z = BED_D / 2 + 0.1;
+    const points = [
+      new Vector3(x, 0, z),
+      new Vector3(-x, 0, z),
+      new Vector3(x, 0, -z),
+      new Vector3(-x, 0, -z),
+    ];
+    if (edge === "long") {
+      points.push(new Vector3(0, 0.95, -BED_D / 2), new Vector3(0, 0.06, BED_D / 2 + 0.45));
+    } else {
+      points.push(new Vector3(-BED_W / 2, 0.95, 0), new Vector3(BED_W / 2 + 0.45, 0.06, 0));
+    }
+    return points;
+  }
 
   // Deliberately on the far side of the bed rather than behind the camera.
   // Wet soil is legible because it reflects — and a specular lobe only reaches
@@ -119,27 +161,92 @@ export function createStage(canvas: HTMLCanvasElement): Stage {
     renderer.setPixelRatio(Math.min(2, globalThis.devicePixelRatio || 1));
     renderer.setSize(width, height, false);
     camera.aspect = width / height;
-    // A phone is much taller than it is wide, so a fixed horizontal field of
-    // view crops the bed to a strip. Widening the vertical FOV on tall frames
-    // keeps the whole bed and the bench in shot at 390x844.
-    camera.fov = height > width ? 74 : 52;
+
+    // Stand at the long side on a wide screen, at the short end on a tall one.
+    view.edge = height > width ? "short" : "long";
+
+    if (view.edge === "long") {
+      // Hand-framed, and left alone. Fitting this view automatically pitched the
+      // camera down until the sky left the top of the frame and the bed sat in a
+      // field of grass — correct by the solver's measure, worse by eye. The
+      // solver earns its place on the short edge, where no hand-picked FOV works
+      // across both viewports.
+      camera.position.set(0, 1.62, BED_D / 2 + 1.3);
+      camera.lookAt(AIM_LONG);
+      camera.fov = 52;
+      camera.updateProjectionMatrix();
+      camera.updateMatrixWorld(true);
+      return;
+    }
+
+    // Higher on a phone, and leaning in. A view from standing height cannot
+    // fill a tall frame with soil at any FOV — a ground plane seen from 1.6m
+    // compresses towards the horizon, so the bed came out as a 176px band under
+    // a screenful of sky. Leaning over the bed is also what you actually do
+    // when you plant something.
+    camera.position.set(BED_W / 2 + 0.6, 2.5, 0);
+    camera.lookAt(AIM);
+    camera.updateMatrixWorld(true);
+    const FIT = fitPoints(view.edge);
+
+    // Pitch until the content sits centred in the frame. Solving the FOV alone
+    // gave a correct fit that framed the bed along the bottom edge under half a
+    // screen of empty sky — the frustum was centred on the horizon, not on the
+    // thing being played.
+    for (let pass = 0; pass < 3; pass += 1) {
+      let lowest = Infinity;
+      let highest = -Infinity;
+      for (const point of FIT) {
+        const local = camera.worldToLocal(point.clone());
+        const ratio = local.y / Math.max(0.1, -local.z);
+        lowest = Math.min(lowest, ratio);
+        highest = Math.max(highest, ratio);
+      }
+      camera.rotateX(Math.atan((lowest + highest) / 2));
+      camera.updateMatrixWorld(true);
+    }
+
+    // Then the smallest vertical FOV that still contains every FIT point,
+    // horizontally (via the aspect) and vertically, with a little margin.
+    let tan = 0;
+    for (const point of FIT) {
+      const local = camera.worldToLocal(point.clone());
+      const depth = Math.max(0.1, -local.z);
+      tan = Math.max(tan, Math.abs(local.y) / depth, Math.abs(local.x) / depth / camera.aspect);
+    }
+    camera.fov = Math.min(96, Math.max(38, (Math.atan(tan * 1.04) * 360) / Math.PI));
     camera.updateProjectionMatrix();
+    camera.updateMatrixWorld(true);
+  }
+
+  function visibleHalfWidthAt(point: Vector3): number {
+    const local = camera.worldToLocal(point.clone());
+    const depth = Math.max(0.1, -local.z);
+    return Math.tan((camera.fov * Math.PI) / 360) * depth * camera.aspect;
   }
 
   function setSeason(t: number): void {
     const k = Math.min(1, Math.max(0, t));
     // The sun crosses and drops. By frost it is low and cold, and the shadows
     // are long — the season told as light, with nothing written down.
-    const angle = -1.5 + k * 3.0;
-    sun.position.set(angle, 2.3 - k * 1.6, -2.6 + k * 0.5);
-    sun.intensity = 2.9 - k * 1.25;
-    sun.color.setHSL(0.11 - k * 0.03, 0.42 + k * 0.16, 0.62 - k * 0.06);
-    sky.intensity = 1.35 - k * 0.35;
+    const sweep = -1.5 + k * 3.0;
+    const far = -2.9 + k * 0.5;
+    // Across the frame, and away from the player — the specular lobe that makes
+    // damp soil legible only reaches a viewer the light is opposite.
+    // The sun drops, but not far. Taken down to 0.7 of its height the shadows
+    // stretched the length of the bed and every plant lay across its own soil,
+    // which read as dusk at midsummer rather than as a season turning.
+    const height = 2.9 - k * 0.75;
+    if (view.edge === "long") sun.position.set(sweep, height, far);
+    else sun.position.set(far, height, sweep);
+    sun.intensity = 3.0 - k * 0.55;
+    sun.color.setHSL(0.11 - k * 0.025, 0.4 + k * 0.14, 0.63 - k * 0.03);
+    sky.intensity = 1.4 - k * 0.18;
 
-    const haze = new Color(0x9dbdd6).lerp(new Color(0xc3c8cf), k);
+    const haze = new Color(0x9dbdd6).lerp(new Color(0xb9c4cc), k);
     scene.background = haze;
     if (scene.fog) (scene.fog as Fog).color.copy(haze);
   }
 
-  return { renderer, scene, camera, sun, resize, setSeason };
+  return { renderer, scene, camera, sun, view, resize, visibleHalfWidthAt, setSeason };
 }
