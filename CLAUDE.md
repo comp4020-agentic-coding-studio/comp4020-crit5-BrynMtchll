@@ -230,6 +230,11 @@ having no listeners at all.
 - **Brightness-mapping a screenshot finds the darkest thing, not the thing you
   meant.** I "found" the wet patch and it was the watering can's own shadow,
   parked on the spot it had just watered.
+- **A probe cannot see what the player cannot see.** Every scripted playthrough
+  passed while the game was unpickupable-up by hand: synthetic presses are aimed
+  at coordinates, so they never noticed that `cursor: none` left a human with no
+  way to tell which of seven tools they were about to press. Instrumentation
+  proves the mechanism works, not that a person can reach it.
 
 ## Your process is part of the mark
 

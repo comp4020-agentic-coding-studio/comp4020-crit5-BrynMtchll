@@ -64,8 +64,16 @@ canvas {
   width: 100%;
   min-height: 0;
 
-  /* The can is the cursor. A second one hovering over it reads as a UI. */
-  cursor: none;
+  /* Empty-handed you need to see where you are pointing: the bench is a board
+     of small objects and picking one up is the first thing anyone does. Once
+     something is in your hand, that becomes the cursor and a second one
+     hovering over it reads as a UI --- main.ts adds .holding for exactly the
+     span of time a tool is held. */
+  cursor: crosshair;
   border-radius: 10px;
   touch-action: none;
+}
+
+canvas.holding {
+  cursor: none;
 }

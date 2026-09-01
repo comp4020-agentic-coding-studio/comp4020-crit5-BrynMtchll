@@ -67,6 +67,7 @@ export function start(canvas: HTMLCanvasElement): void {
   const hand = new Vector3(0, 0.5, 0);
   const held = { pos: new Vector3(0, 0.5, 0), vel: new Vector3() };
   let holding: Tool | null = null;
+  let hovered: Tool | null = null;
   let acting = false;
 
   const raycaster = new Raycaster();
@@ -262,6 +263,7 @@ export function start(canvas: HTMLCanvasElement): void {
 
     const target = hit();
     if (target) hand.copy(target.point);
+    hovered = target ? toolFor(target.object) : null;
 
     // Spring-damped, underdamped: the tool trails your hand and overshoots it.
     const toHand = hand.clone().sub(held.pos).multiplyScalar(PULL_K);
@@ -334,7 +336,12 @@ export function start(canvas: HTMLCanvasElement): void {
         const sway = stage.view.edge === "long" ? held.vel.x : held.vel.z;
         tool.object.rotation.z = Math.max(-0.9, Math.min(0.9, -sway * 0.06));
       } else {
-        tool.object.position.set(tool.home.x, tool.home.y, tool.home.z);
+        // The one under the pointer lifts off the board, the way a thing you
+        // are reaching for does. With the cursor hidden and no tool in hand
+        // there was nothing at all to say which of the seven you were about to
+        // pick up.
+        const reach = hovered?.id === tool.id && garden.ending === null ? 0.02 : 0;
+        tool.object.position.set(tool.home.x, tool.home.y + reach, tool.home.z);
         tool.object.rotation.z = tool.id === "trowel" ? 0.35 : 0;
       }
     }
@@ -360,6 +367,8 @@ export function start(canvas: HTMLCanvasElement): void {
       const trowel = bench.tools.find((t) => t.id === "trowel");
       if (trowel) trowel.object.position.y = trowel.home.y + Math.abs(Math.sin(clock * 1.6)) * 0.07;
     }
+
+    canvas.classList.toggle("holding", holding !== null);
 
     stage.renderer.render(stage.scene, stage.camera);
     requestAnimationFrame(frame);

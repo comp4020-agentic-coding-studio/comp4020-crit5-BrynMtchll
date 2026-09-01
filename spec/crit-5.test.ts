@@ -172,6 +172,26 @@ describe("sensors: standards I hold the work to, whatever the brief is", () => {
   // These outlive crit 5 and come forward into next week's repo — see
   // spec/README.md on contract tests versus sensors.
 
+  it("never leaves the player unable to see where they are pointing", () => {
+    // Found by being asked "how do I use the tools?" about my own game. The
+    // canvas hid the cursor outright, on the reasoning that the held tool *is*
+    // the cursor — true, but only from the moment you are holding one. Before
+    // that you are moving an invisible pointer over a board of seven small
+    // objects, and picking one up is the first thing anyone does.
+    //
+    // In a game with no words, being able to see where you are pointing is not
+    // chrome, it is the whole affordance. So: hiding the cursor is allowed, but
+    // never as the only state the page has.
+    const cursors = [...shipped.matchAll(/cursor:\s*([a-z-]+)/gi)].map((match) =>
+      (match[1] ?? "").toLowerCase(),
+    );
+    expect(cursors.length, "the page should say something about the cursor").toBeGreaterThan(0);
+    expect(
+      cursors.some((cursor) => cursor !== "none"),
+      "every cursor rule shipped is `none`: empty-handed, nothing on screen says where the pointer is",
+    ).toBe(true);
+  });
+
   it("can be won by playing it well, not just lost by playing it badly", () => {
     // The sensor this repo most needed and did not have. Every rule test below
     // asserts the *shape* of a rule — a saturated cell sheds faster than a damp
