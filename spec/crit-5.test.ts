@@ -2,7 +2,26 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
-import { createGarden, POUR_PER_S, pour, SEASON_S, step } from "../src/lib/garden";
+import {
+  createGarden,
+  dig,
+  DIG_PER_S,
+  type Garden,
+  POUR_PER_S,
+  pour,
+  SEASON_S,
+  sow,
+  step,
+} from "../src/lib/garden";
+
+const DT = 1 / 60;
+
+/** Dig and sow the way a player does — the bed starts empty. */
+function planted(seed: number, cx = 4, cy = 3): Garden {
+  let garden = createGarden(seed);
+  for (let i = 0; i < 60; i += 1) garden = dig(garden, cx, cy, DIG_PER_S * DT);
+  return sow(garden, cx, cy, "kangaroo-paw");
+}
 
 // Crit 5 ("A game"): https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/crits/05-game/
 // Only the mechanically-checkable lines of the published spec get a test here.
@@ -98,12 +117,12 @@ describe("crit 5 spec: a game", () => {
     // change of stack, and against the *transition* rather than a flag: the
     // plant is alive, the move is repeated, the plant is dead, and the season
     // ends without reaching frost.
-    const start = createGarden(1);
+    const start = planted(1);
     const plant = start.plants[0];
     if (!plant) throw new Error("expected a planted seed");
     expect(plant.dead).toBe(false);
 
-    const dt = 1 / 60;
+    const dt = DT;
     let garden = start;
     for (let elapsed = 0; elapsed < 40; elapsed += dt) {
       garden = pour(garden, plant.cx, plant.cy, POUR_PER_S * dt);
@@ -121,11 +140,11 @@ describe("crit 5 spec: a game", () => {
     // The other half of the same spec line. There is no winning state to
     // reach — the season simply ends, and the garden is whatever it is. A run
     // that is never going to end would fail this outright.
-    const start = createGarden(3);
+    const start = planted(3);
     const plant = start.plants[0];
     if (!plant) throw new Error("expected a planted seed");
 
-    const dt = 1 / 60;
+    const dt = DT;
     let garden = start;
     for (let elapsed = 0; elapsed < SEASON_S + 1 && garden.ending === null; elapsed += dt) {
       garden = pour(garden, plant.cx - 1, plant.cy, POUR_PER_S * dt);
@@ -153,7 +172,7 @@ describe("sensors: standards I hold the work to, whatever the brief is", () => {
     // on one machine and not another. Two different tick sizes covering the
     // same elapsed time must land in the same place.
     const play = (dt: number) => {
-      let garden = createGarden(5);
+      let garden = planted(5);
       const plant = garden.plants[0];
       if (!plant) throw new Error("expected a planted seed");
       for (let elapsed = 0; elapsed < 20; elapsed += dt) {
@@ -169,7 +188,7 @@ describe("sensors: standards I hold the work to, whatever the brief is", () => {
     // Determinism is what makes a hidden rule learnable rather than a coin
     // toss, and it is what makes any of this testable at all.
     const play = (seed: number) => {
-      let garden = createGarden(seed);
+      let garden = planted(seed);
       for (let i = 0; i < 60 * 30; i += 1) garden = step(garden, 1 / 60);
       return JSON.stringify({ weeds: garden.weeds, plants: garden.plants });
     };

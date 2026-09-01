@@ -6,6 +6,8 @@
 // 390x844, and no single fixed grid reads well at both — so the caller picks
 // dimensions from the viewport and the rules don't care which it picked.
 
+import type { SpeciesId } from "./species";
+
 /** Moisture the ring around a plant wants. Growth happens in this band, nowhere else. */
 export const BAND_MIN = 0.3;
 export const BAND_MAX = 0.72;
@@ -41,6 +43,12 @@ const WEED_INTERVAL_S = 5.5;
 
 export const POUR_PER_S = 1.7;
 
+/** Hole depth gained per second of digging, and what counts as deep enough. */
+export const DIG_PER_S = 1.1;
+export const SOWABLE_DEPTH = 0.55;
+/** An open hole slumps shut if it is left alone. */
+const HOLE_SLUMP_PER_S = 0.055;
+
 const NEIGHBOURS = [
   [-1, 0],
   [1, 0],
@@ -51,6 +59,7 @@ const NEIGHBOURS = [
 export type Stage = "seed" | "sprout" | "leaf" | "bud" | "bloom" | "dead";
 
 export interface Plant {
+  readonly species: SpeciesId;
   readonly cx: number;
   readonly cy: number;
   /** 0..1 across the stages. Only ever rises. */
@@ -60,6 +69,13 @@ export interface Plant {
   /** 0..1, dead at 1. Recovers, unlike rot. */
   readonly thirst: number;
   readonly dead: boolean;
+}
+
+/** A dug hole, waiting for a seed. Depth is 0..1. */
+export interface Hole {
+  readonly cx: number;
+  readonly cy: number;
+  readonly depth: number;
 }
 
 export interface Weed {
@@ -77,6 +93,7 @@ export interface Garden {
   readonly moisture: Float32Array;
   readonly plants: readonly Plant[];
   readonly weeds: readonly Weed[];
+  readonly holes: readonly Hole[];
   /** Seconds elapsed this season. */
   readonly t: number;
   readonly seed: number;
@@ -127,26 +144,10 @@ export function crownMoisture(garden: Garden, cx: number, cy: number): number {
   return garden.moisture[idx(garden, cx, cy)] ?? 0;
 }
 
-/** How many beds a plot of this width should open with. */
-function bedCount(w: number): number {
-  return Math.max(3, Math.min(5, Math.round(w / 2.8)));
-}
-
 export function createGarden(seed: number, w = 12, h = 8): Garden {
-  // Seeds are already in the ground when a season opens. Planting would be a
-  // second verb to discover, and the opening frame has to read in one glance:
-  // damp soil, sprouts, a can that follows your hand.
-  const count = bedCount(w);
-  const row = Math.max(1, Math.floor(h / 2) - 1);
-  const plants: Plant[] = Array.from({ length: count }, (_, i) => ({
-    cx: Math.round(((i + 1) * w) / (count + 1)),
-    cy: row + (i % 2),
-    growth: 0.05,
-    rot: 0,
-    thirst: 0,
-    dead: false,
-  }));
-
+  // The bed opens empty. Planting is the work now — digging a hole, choosing
+  // what goes in it, and covering it over — so seeding the plot for the player
+  // would take away the first thing they get to do.
   const moisture = new Float32Array(w * h);
   moisture.fill(0.34);
 
@@ -154,12 +155,65 @@ export function createGarden(seed: number, w = 12, h = 8): Garden {
     w,
     h,
     moisture,
-    plants,
+    plants: [],
     weeds: [],
+    holes: [],
     t: 0,
     seed,
     nextWeedAt: WEED_INTERVAL_S,
     ending: null,
+  };
+}
+
+export function holeAt(garden: Garden, cx: number, cy: number): number {
+  return garden.holes.findIndex((hole) => hole.cx === cx && hole.cy === cy);
+}
+
+export function plantAt(garden: Garden, cx: number, cy: number): number {
+  return garden.plants.findIndex((plant) => plant.cx === cx && plant.cy === cy);
+}
+
+/** Open or deepen a hole. Refuses ground that is already spoken for. */
+export function dig(garden: Garden, cx: number, cy: number, amount: number): Garden {
+  if (garden.ending !== null || !inBounds(garden, cx, cy)) return garden;
+  if (plantAt(garden, cx, cy) >= 0) return garden;
+
+  const existing = holeAt(garden, cx, cy);
+  if (existing >= 0) {
+    const holes = garden.holes.map((hole, i) =>
+      i === existing ? { ...hole, depth: Math.min(1, hole.depth + amount) } : hole,
+    );
+    return { ...garden, holes };
+  }
+  // Digging where a weed is takes the weed with it — the one free way to
+  // clear one, and the reason a trowel is worth carrying.
+  const weeds = garden.weeds.filter((weed) => !(weed.cx === cx && weed.cy === cy));
+  return { ...garden, weeds, holes: [...garden.holes, { cx, cy, depth: amount }] };
+}
+
+/**
+ * Drop a seed into a hole and close the soil over it. A hole that isn't deep
+ * enough won't take one — the seed would sit on the surface.
+ */
+export function sow(
+  garden: Garden,
+  cx: number,
+  cy: number,
+  species: SpeciesId,
+): Garden {
+  if (garden.ending !== null) return garden;
+  const index = holeAt(garden, cx, cy);
+  const hole = garden.holes[index];
+  if (hole === undefined || hole.depth < SOWABLE_DEPTH) return garden;
+  if (plantAt(garden, cx, cy) >= 0) return garden;
+
+  return {
+    ...garden,
+    holes: garden.holes.filter((_, i) => i !== index),
+    plants: [
+      ...garden.plants,
+      { species, cx, cy, growth: 0.02, rot: 0, thirst: 0, dead: false },
+    ],
   };
 }
 
@@ -210,7 +264,8 @@ export function weedAt(garden: Garden, cx: number, cy: number): number {
 function occupied(garden: Garden, cx: number, cy: number): boolean {
   return (
     garden.plants.some((p) => p.cx === cx && p.cy === cy) ||
-    garden.weeds.some((w) => w.cx === cx && w.cy === cy)
+    garden.weeds.some((w) => w.cx === cx && w.cy === cy) ||
+    garden.holes.some((o) => o.cx === cx && o.cy === cy)
   );
 }
 
@@ -240,6 +295,10 @@ export function step(garden: Garden, dt: number): Garden {
     }
   }
 
+  const holes = garden.holes
+    .map((hole) => ({ ...hole, depth: hole.depth - HOLE_SLUMP_PER_S * dt }))
+    .filter((hole) => hole.depth > 0);
+
   let weeds = garden.weeds.map((weed) => ({
     ...weed,
     size: Math.min(1, weed.size + WEED_GROW_PER_S * dt),
@@ -256,7 +315,7 @@ export function step(garden: Garden, dt: number): Garden {
     }
   }
 
-  const drying: Garden = { ...garden, moisture };
+  const drying: Garden = { ...garden, moisture, holes };
 
   const plants = garden.plants.map((plant) => {
     if (plant.dead) return plant;
@@ -301,8 +360,10 @@ export function step(garden: Garden, dt: number): Garden {
     if (!occupied(probe, cx, cy)) weeds = [...weeds, { cx, cy, size: 0.1 }];
   }
 
-  const alive = plants.some((plant) => !plant.dead);
-  const ending: Ending | null = !alive ? "barren" : t >= SEASON_S ? "frost" : null;
+  // An empty bed is not a barren one. Barren means everything you planted
+  // died; a plot you haven't sown yet simply has a season still to run.
+  const barren = plants.length > 0 && plants.every((plant) => plant.dead);
+  const ending: Ending | null = barren ? "barren" : t >= SEASON_S ? "frost" : null;
 
-  return { ...garden, moisture, plants, weeds, t, seed, nextWeedAt, ending };
+  return { ...garden, moisture, plants, weeds, holes, t, seed, nextWeedAt, ending };
 }

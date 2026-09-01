@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  dig,
+  DIG_PER_S,
+  holeAt,
+  sow,
   BAND_MIN,
   CROWN_ROT,
   createGarden,
@@ -16,6 +20,13 @@ import {
 } from "./garden";
 
 const DT = 1 / 60;
+
+/** Dig a hole and sow one, the way a player does, so tests start where play does. */
+function planted(seed = 1, cx = 4, cy = 3): Garden {
+  let garden = createGarden(seed);
+  for (let i = 0; i < 60; i += 1) garden = dig(garden, cx, cy, DIG_PER_S * DT);
+  return sow(garden, cx, cy, "kangaroo-paw");
+}
 
 /** Run the sim for `seconds`, optionally acting on the garden every tick. */
 function run(garden: Garden, seconds: number, act?: (g: Garden) => Garden): Garden {
@@ -46,7 +57,7 @@ describe("soil", () => {
     // Quadratic drainage is what makes little-and-often the better watering
     // habit. If this ever went linear, the hidden rule would stop paying.
     const drop = (start: number) => {
-      let garden = createGarden(1);
+      let garden: Garden = createGarden(1);
       const moisture = Float32Array.from(garden.moisture);
       moisture[idx(garden, 0, 0)] = start;
       garden = { ...garden, moisture };
@@ -59,7 +70,7 @@ describe("soil", () => {
 
 describe("the hidden rule: roots drink from the ring, only the crown rots", () => {
   it("grows a plant watered beside the stem", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     const plant = garden.plants[0];
     if (!plant) throw new Error("expected a planted seed");
 
@@ -73,7 +84,7 @@ describe("the hidden rule: roots drink from the ring, only the crown rots", () =
   });
 
   it("kills a plant watered on the stem", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     const plant = garden.plants[0];
     if (!plant) throw new Error("expected a planted seed");
 
@@ -86,7 +97,7 @@ describe("the hidden rule: roots drink from the ring, only the crown rots", () =
   });
 
   it("reads the ring without counting the crown", () => {
-    let garden = createGarden(1);
+    let garden: Garden = createGarden(1);
     const moisture = Float32Array.from(garden.moisture);
     moisture.fill(0);
     moisture[idx(garden, 5, 5)] = 1;
@@ -99,7 +110,7 @@ describe("the hidden rule: roots drink from the ring, only the crown rots", () =
 
 describe("thirst forgives, rot does not", () => {
   it("lets a wilting plant recover when the ring comes back into band", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     const plant = garden.plants[0];
     if (!plant) throw new Error("expected a planted seed");
 
@@ -117,7 +128,7 @@ describe("thirst forgives, rot does not", () => {
   });
 
   it("never lets rot fall, whatever you do afterwards", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     const plant = garden.plants[0];
     if (!plant) throw new Error("expected a planted seed");
 
@@ -135,14 +146,14 @@ describe("thirst forgives, rot does not", () => {
 
 describe("weeds", () => {
   it("arrive on a seeded schedule, so a season replays identically", () => {
-    const a = run(createGarden(7), 30);
-    const b = run(createGarden(7), 30);
+    const a = run(planted(7), 30);
+    const b = run(planted(7), 30);
     expect(b.weeds).toEqual(a.weeds);
-    expect(run(createGarden(8), 30).weeds).not.toEqual(a.weeds);
+    expect(run(planted(8), 30).weeds).not.toEqual(a.weeds);
   });
 
   it("cost more to pull the longer they are left", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     const plant = garden.plants[0];
     if (!plant) throw new Error("expected a planted seed");
 
@@ -159,7 +170,7 @@ describe("weeds", () => {
   });
 
   it("leaves a plant alone when pulled from open soil", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     const plant = garden.plants[0];
     if (!plant) throw new Error("expected a planted seed");
 
@@ -173,7 +184,7 @@ describe("weeds", () => {
 
 describe("the season ends", () => {
   it("finishes at frost with whatever survived", () => {
-    const garden = createGarden(3);
+    const garden = planted(3);
     const plant = garden.plants[0];
     if (!plant) throw new Error("expected a planted seed");
 
@@ -182,7 +193,7 @@ describe("the season ends", () => {
   });
 
   it("ends early when nothing is left alive", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     // Nothing watered, ever: the whole plot should wilt out well inside a
     // season, so walking away is itself a way to lose.
     const parched: Garden = {
@@ -196,7 +207,7 @@ describe("the season ends", () => {
   });
 
   it("stops simulating once it is over", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     const over: Garden = { ...garden, ending: "frost" };
     expect(step(over, DT)).toBe(over);
   });
@@ -204,7 +215,14 @@ describe("the season ends", () => {
 
 describe("stages", () => {
   it("reads growth as a visible stage, and death overrides everything", () => {
-    const base = { cx: 0, cy: 0, rot: 0, thirst: 0, dead: false };
+    const base = {
+      species: "wattle" as const,
+      cx: 0,
+      cy: 0,
+      rot: 0,
+      thirst: 0,
+      dead: false,
+    };
     expect(stageOf({ ...base, growth: 0 })).toBe("seed");
     expect(stageOf({ ...base, growth: 0.2 })).toBe("sprout");
     expect(stageOf({ ...base, growth: 0.5 })).toBe("leaf");
@@ -214,10 +232,53 @@ describe("stages", () => {
   });
 
   it("keeps a thirsty plant below the band from growing at all", () => {
-    const garden = createGarden(1);
+    const garden = planted(1);
     const dry = { ...garden, moisture: new Float32Array(garden.moisture.length) };
     const after = run(dry, 5);
-    expect(ringMoisture(after, 2, 4)).toBeLessThan(BAND_MIN);
+    expect(ringMoisture(after, 3, 2)).toBeLessThan(BAND_MIN);
     expect(after.plants[0]?.growth).toBe(garden.plants[0]?.growth);
+  });
+});
+
+describe("planting", () => {
+  it("won't take a seed until the hole is deep enough", () => {
+    let garden = createGarden(1);
+    garden = dig(garden, 4, 3, 0.2);
+    expect(sow(garden, 4, 3, "banksia").plants).toHaveLength(0);
+
+    for (let i = 0; i < 60; i += 1) garden = dig(garden, 4, 3, DIG_PER_S * DT);
+    const sown = sow(garden, 4, 3, "banksia");
+    expect(sown.plants).toHaveLength(1);
+    expect(sown.plants[0]?.species).toBe("banksia");
+  });
+
+  it("closes the hole over the seed", () => {
+    const sown = planted();
+    expect(holeAt(sown, 4, 3)).toBe(-1);
+  });
+
+  it("refuses to dig where something is already growing", () => {
+    const sown = planted();
+    expect(dig(sown, 4, 3, DIG_PER_S).holes).toHaveLength(0);
+  });
+
+  it("takes a weed out with the spadeful", () => {
+    const garden: Garden = { ...createGarden(1), weeds: [{ cx: 6, cy: 2, size: 0.8 }] };
+    expect(dig(garden, 6, 2, DIG_PER_S * DT).weeds).toHaveLength(0);
+  });
+
+  it("lets an unsown hole slump shut on its own", () => {
+    let garden = createGarden(1);
+    for (let i = 0; i < 60; i += 1) garden = dig(garden, 4, 3, DIG_PER_S * DT);
+    const depth = garden.holes[0]?.depth ?? 0;
+    for (let i = 0; i < 60; i += 1) garden = step(garden, DT);
+    expect(garden.holes[0]?.depth ?? 0).toBeLessThan(depth);
+  });
+
+  it("does not call an unsown bed barren", () => {
+    let garden = createGarden(1);
+    for (let i = 0; i < 60 * 20; i += 1) garden = step(garden, DT);
+    expect(garden.plants).toHaveLength(0);
+    expect(garden.ending).toBeNull();
   });
 });
