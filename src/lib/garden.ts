@@ -20,7 +20,7 @@ export const BAND_MAX = 0.72;
  */
 export const CROWN_ROT = 0.78;
 
-export const SEASON_S = 80;
+export const SEASON_S = 110;
 
 const GROWTH_PER_S = 1 / 30;
 const ROT_PER_S = 1 / 11;
@@ -39,7 +39,7 @@ const DIFFUSE_PER_S = 0.55;
 
 const WEED_GROW_PER_S = 1 / 22;
 const WEED_DRINK_PER_S = 0.22;
-const WEED_INTERVAL_S = 5.5;
+const WEED_INTERVAL_S = 9;
 
 export const POUR_PER_S = 1.7;
 
