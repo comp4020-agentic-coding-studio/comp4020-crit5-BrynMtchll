@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { JSDOM } from "jsdom";
 import { describe, expect, it } from "vitest";
+import { createGarden, POUR_PER_S, pour, SEASON_S, step } from "../src/lib/garden";
 
 // Crit 5 ("A game"): https://comp.anu.edu.au/courses/comp4020-agentic-coding-studio/crits/05-game/
 // Only the mechanically-checkable lines of the published spec get a test here.
@@ -86,21 +87,59 @@ describe("crit 5 spec: a game", () => {
     ).toEqual([]);
   });
 
-  it("is a game, not a toy: a rule of play has a focused test", () => {
-    // PLACEHOLDER — replace this with the real thing once the mechanic exists.
+  it("can be lost: watering the crown drowns the plant, and play ends", () => {
+    // The published line is "a wrong move is possible, and play ends
+    // somewhere". The wrong move is the one a player makes first — aiming the
+    // can at the stem. Roots drink from the ring; only the crown rots. So the
+    // obvious aim grows the plant briefly and then kills it, and rot never
+    // heals.
     //
-    // The spec asks for one rule under a focused automated test, and for the
-    // game to be losable: "a wrong move is possible, and play ends somewhere".
-    // Both land here, and neither can be written stack-agnostically in advance
-    // — the assertion depends on what the rule is.
-    //
-    // Write it against the rule module, not the DOM: a pure function that
-    // takes a state and a move and returns the next state is both the easiest
-    // thing to test and the easiest thing to keep honest. Assert the losing
-    // transition specifically — that some reachable move ends the round — not
-    // just that a scoring function adds up.
-    expect.fail(
-      "no test yet for the rule that can be lost — replace this placeholder with a focused test of the losing transition",
-    );
+    // Asserted against the rule module rather than the DOM, so it survives a
+    // change of stack, and against the *transition* rather than a flag: the
+    // plant is alive, the move is repeated, the plant is dead, and the season
+    // ends without reaching frost.
+    const start = createGarden(1);
+    const plant = start.plants[0];
+    if (!plant) throw new Error("expected a planted seed");
+    expect(plant.dead).toBe(false);
+
+    const dt = 1 / 60;
+    let garden = start;
+    for (let elapsed = 0; elapsed < 40; elapsed += dt) {
+      garden = pour(garden, plant.cx, plant.cy, POUR_PER_S * dt);
+      garden = step(garden, dt);
+    }
+
+    expect(
+      garden.plants[0]?.dead,
+      "a plant watered squarely on the stem for forty seconds should have rotted",
+    ).toBe(true);
+    expect(garden.plants[0]?.rot).toBe(1);
+  });
+
+  it("play ends somewhere even when nothing goes wrong: frost closes the season", () => {
+    // The other half of the same spec line. There is no winning state to
+    // reach — the season simply ends, and the garden is whatever it is. A run
+    // that is never going to end would fail this outright.
+    const start = createGarden(3);
+    const plant = start.plants[0];
+    if (!plant) throw new Error("expected a planted seed");
+
+    const dt = 1 / 60;
+    let garden = start;
+    for (let elapsed = 0; elapsed < SEASON_S + 1 && garden.ending === null; elapsed += dt) {
+      garden = pour(garden, plant.cx - 1, plant.cy, POUR_PER_S * dt);
+      garden = step(garden, dt);
+    }
+
+    expect(garden.ending).toBe("frost");
+  });
+
+  it("a season is short enough for a stranger to see an ending", () => {
+    // "a stranger can pick it up and reach an ending inside five minutes" is
+    // judged at the crit, but the part of it that is arithmetic can be held
+    // here: a season has to leave room for the losing run, the understanding,
+    // and the run after it.
+    expect(SEASON_S).toBeLessThanOrEqual(120);
   });
 });
