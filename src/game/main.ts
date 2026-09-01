@@ -127,7 +127,7 @@ export function start(canvas: HTMLCanvasElement): void {
     if (garden.ending !== null) endingFade = Math.min(1, endingFade + dt * 1.4);
 
     if (pouring && garden.ending === null) {
-      const point = pourPoint(can);
+      const point = pourPoint(can, layout);
       droplets.push({ x: point.x, y: point.y, vx: can.vx * 0.16, vy: 260, life: 1 });
       // The stream is aimed where it will land, not where it leaves: the drop
       // falls for a moment before it reaches the soil, and the cell it wets is
@@ -170,7 +170,7 @@ export function start(canvas: HTMLCanvasElement): void {
     garden.plants.forEach((plant, i) => drawPlant(ctx, plant, i, layout, clock));
     drawDroplets(ctx, droplets);
     if (!hasPoured && clock > HINT_AFTER_S) drawHintDrip(ctx, can, layout, clock * 0.6);
-    drawCan(ctx, can, pouring);
+    drawCan(ctx, can, layout, pouring);
     if (garden.ending !== null) drawFrost(ctx, garden, layout, endingFade);
 
     requestAnimationFrame(frame);

@@ -9,14 +9,13 @@
 import {
   CROWN_ROT,
   type Garden,
-  idx,
   type Plant,
   SEASON_S,
   stageOf,
   type Weed,
 } from "../lib/garden";
 import type { Can } from "./can";
-import { cellCentre, type Layout } from "./world";
+import { canScale, cellCentre, type Layout } from "./world";
 
 export interface Droplet {
   x: number;
@@ -36,6 +35,21 @@ function mix(a: readonly number[], b: readonly number[], t: number): string {
   const k = Math.max(0, Math.min(1, t));
   const c = (i: number) => Math.round((a[i] ?? 0) + ((b[i] ?? 0) - (a[i] ?? 0)) * k);
   return `rgb(${c(0)} ${c(1)} ${c(2)})`;
+}
+
+let field: { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null = null;
+
+/** One-pixel-per-cell scratch buffer for the moisture field. Allocated once. */
+function fieldCanvas(w: number, h: number) {
+  if (field === null || field.canvas.width !== w || field.canvas.height !== h) {
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (ctx === null) throw new Error("no 2d context for the moisture field");
+    field = { canvas, ctx };
+  }
+  return field;
 }
 
 /** Stable pseudo-random in 0..1 from an integer. Never varies between frames. */
@@ -84,30 +98,47 @@ export function drawSoil(
   const plotW = cell * layout.cols;
   const plotH = cell * layout.rows;
 
-  // One base slab first, then cells drawn over it with a half-pixel bleed:
-  // fractional cell sizes leave hairline seams otherwise, and a grid of seams
-  // reads as a spreadsheet rather than a bed of soil.
-  ctx.fillStyle = mix(SOIL_DRY, SOIL_WET, 0.4);
-  ctx.fillRect(originX, originY, plotW, plotH);
-
-  for (let y = 0; y < garden.h; y += 1) {
-    for (let x = 0; x < garden.w; x += 1) {
-      const m = garden.moisture[idx(garden, x, y)] ?? 0;
-      const px = originX + x * cell;
-      const py = originY + y * cell;
-      ctx.fillStyle = mix(SOIL_DRY, SOIL_WET, Math.pow(m, 0.75));
-      ctx.fillRect(px - 0.5, py - 0.5, cell + 1, cell + 1);
-
-      // Waterlogged soil gets a sheen. It is the only warning the crown rule
-      // gives you before the plant starts to bloat, and it arrives late on
-      // purpose.
-      if (m > CROWN_ROT) {
-        const t = (m - CROWN_ROT) / (1 - CROWN_ROT);
-        ctx.fillStyle = `rgb(163 196 206 / ${t * 0.36})`;
-        ctx.fillRect(px - 0.5, py - 0.5, cell + 1, cell + 1);
-      }
+  // The moisture field is painted one pixel per cell into an offscreen buffer
+  // and then scaled up with smoothing on. Drawing it as filled rectangles
+  // instead gives hard square edges, and a plot of hard squares reads as a
+  // tile map — the player sees a grid they are aiming at rather than damp
+  // ground spreading, which is exactly the wrong mental model for a rule about
+  // where water goes.
+  const field = fieldCanvas(garden.w, garden.h);
+  const image = field.ctx.createImageData(garden.w, garden.h);
+  for (let i = 0; i < garden.w * garden.h; i += 1) {
+    const m = garden.moisture[i] ?? 0;
+    const k = Math.pow(m, 0.75);
+    // Waterlogged soil takes a cold sheen. It is the only warning the crown
+    // rule gives before the plant starts to bloat, and it arrives late on
+    // purpose.
+    const sheen = m > CROWN_ROT ? ((m - CROWN_ROT) / (1 - CROWN_ROT)) * 0.42 : 0;
+    for (let c = 0; c < 3; c += 1) {
+      const soil = (SOIL_DRY[c] ?? 0) + ((SOIL_WET[c] ?? 0) - (SOIL_DRY[c] ?? 0)) * k;
+      const cold = [150, 186, 200][c] ?? 0;
+      image.data[i * 4 + c] = Math.round(soil + (cold - soil) * sheen);
     }
+    image.data[i * 4 + 3] = 255;
   }
+  field.ctx.putImageData(image, 0, 0);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(originX, originY, plotW, plotH);
+  ctx.clip();
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  // Half a cell of overdraw on each side: bilinear sampling puts cell centres
+  // at pixel centres, so without the offset the outermost half-cell is a
+  // stretched edge sample rather than the colour that cell actually holds.
+  ctx.drawImage(
+    field.canvas,
+    originX - cell / 2,
+    originY - cell / 2,
+    plotW + cell,
+    plotH + cell,
+  );
+  ctx.restore();
 
   // Clods and grit, seeded off the cell index so they sit still between
   // frames and rescale with the grid. Without them a wet plot is a brown
@@ -179,10 +210,49 @@ export function drawPlant(
   }
 
   const height = cell * (0.45 + plant.growth * 1.5);
-  // Three postures, one variable each: thirst leans it over, rot fattens it,
-  // death folds it flat.
-  const droop = plant.dead ? 1.3 : plant.thirst * 0.9;
-  const sway = plant.dead ? 0 : Math.sin(time * 1.4 + index) * 0.045 * (1 - plant.thirst);
+
+  if (plant.dead) {
+    // Died back, not laid down. Rendering a dead plant as a leafy shape at a
+    // steep angle read as a grey slug on the soil; a bare stem folded over
+    // with its leaves dropped around the base reads as what it is.
+    const fold = 1.42;
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "rgb(126 108 84)";
+    ctx.lineWidth = cell * 0.028;
+    ctx.beginPath();
+    ctx.moveTo(x, base);
+    ctx.quadraticCurveTo(
+      x + Math.sin(fold) * height * 0.3,
+      base - height * 0.55,
+      x + Math.sin(fold) * height * 0.82,
+      base - Math.cos(fold) * height * 0.5,
+    );
+    ctx.stroke();
+
+    ctx.fillStyle = "rgb(146 126 98 / 0.85)";
+    for (let i = 0; i < 4; i += 1) {
+      const dx = (hash(index * 31 + i) - 0.5) * cell * 1.1;
+      const dy = (hash(index * 17 + i + 400) - 0.5) * cell * 0.22;
+      ctx.beginPath();
+      ctx.ellipse(
+        x + dx,
+        base + dy,
+        cell * 0.09,
+        cell * 0.035,
+        hash(i + index) * 3,
+        0,
+        Math.PI * 2,
+      );
+      ctx.fill();
+    }
+    ctx.restore();
+    return;
+  }
+
+  // Two postures, one variable each: thirst leans it over, rot fattens it.
+  const droop = plant.thirst * 0.9;
+  const sway = Math.sin(time * 1.4 + index) * 0.045 * (1 - plant.thirst);
   const lean = droop + sway;
   const fat = 1 + plant.rot * 1.4;
 
@@ -291,10 +361,17 @@ export function drawDroplets(ctx: CanvasRenderingContext2D, droplets: Droplet[])
   }
 }
 
-export function drawCan(ctx: CanvasRenderingContext2D, can: Can, pouring: boolean): void {
+export function drawCan(
+  ctx: CanvasRenderingContext2D,
+  can: Can,
+  layout: Layout,
+  pouring: boolean,
+): void {
+  const s = canScale(layout);
   ctx.save();
   ctx.translate(can.x, can.y);
   ctx.rotate(can.tilt);
+  ctx.scale(s, s);
 
   ctx.fillStyle = "rgb(154 162 166)";
   ctx.strokeStyle = "rgb(92 100 106)";
@@ -340,10 +417,11 @@ export function drawHintDrip(
   layout: Layout,
   phase: number,
 ): void {
+  const s = canScale(layout);
   const fall = (phase % 1) * layout.originY * 0.8;
   ctx.fillStyle = `rgb(122 172 196 / ${0.8 * (1 - (phase % 1))})`;
   ctx.beginPath();
-  ctx.ellipse(can.x + 46, can.y + 20 + fall, 2.8, 5.8, 0, 0, Math.PI * 2);
+  ctx.ellipse(can.x + 46 * s, can.y + 20 * s + fall, 2.8, 5.8, 0, 0, Math.PI * 2);
   ctx.fill();
 }
 
@@ -353,18 +431,30 @@ export function drawFrost(
   layout: Layout,
   fade: number,
 ): void {
-  ctx.fillStyle = `rgb(228 239 245 / ${0.5 * fade})`;
+  ctx.fillStyle = `rgb(224 236 244 / ${0.4 * fade})`;
   ctx.fillRect(0, 0, layout.width, layout.height);
 
   // What a season leaves behind: every bloom that made it drops a seed, and
   // the seeds are the only thing still moving. Pressing one starts again.
-  garden.plants.forEach((plant, i) => {
-    if (plant.dead || stageOf(plant) !== "bloom") return;
-    const { x, y } = cellCentre(layout, plant.cx, plant.cy);
-    const bob = Math.sin(fade * 3 + i) * layout.cell * 0.03;
+  const bloomed = garden.plants.filter((p) => !p.dead && stageOf(p) === "bloom");
+
+  // A barren season has no blooms and so had nothing to press — the restart
+  // affordance vanished exactly when a player most needed it. One seed arrives
+  // regardless, in the middle of the plot.
+  const seeds =
+    bloomed.length > 0
+      ? bloomed.map((p) => cellCentre(layout, p.cx, p.cy))
+      : [cellCentre(layout, Math.floor(layout.cols / 2), Math.floor(layout.rows / 2))];
+
+  seeds.forEach((at, i) => {
+    const bob = Math.sin(fade * 3 + i) * layout.cell * 0.04;
+    ctx.fillStyle = `rgb(70 92 66 / ${0.16 * fade})`;
+    ctx.beginPath();
+    ctx.arc(at.x, at.y + bob, layout.cell * 0.3, 0, Math.PI * 2);
+    ctx.fill();
     ctx.fillStyle = "rgb(94 76 54)";
     ctx.beginPath();
-    ctx.ellipse(x, y + layout.cell * 0.2 + bob, layout.cell * 0.07, layout.cell * 0.1, 0, 0, Math.PI * 2);
+    ctx.ellipse(at.x, at.y + bob, layout.cell * 0.075, layout.cell * 0.105, 0.4, 0, Math.PI * 2);
     ctx.fill();
   });
 }

@@ -4,7 +4,7 @@
 //
 // Pure and deterministic, like the soil: same inputs, same wobble.
 
-import type { Layout } from "./world";
+import { canScale, type Layout } from "./world";
 
 /** Spring pulling the can toward your hand. Low enough to overshoot. */
 const PULL = 46;
@@ -57,10 +57,11 @@ export function stepCan(
 }
 
 /** Where the lip of the spout is, given how far the can has swung over. */
-export function spoutOf(can: Can): { x: number; y: number } {
+export function spoutOf(can: Can, layout: Layout): { x: number; y: number } {
+  const s = canScale(layout);
   return {
-    x: can.x + Math.sin(can.tilt) * SPOUT_REACH + can.tilt * 26,
-    y: can.y + Math.cos(can.tilt) * 20,
+    x: can.x + (Math.sin(can.tilt) * SPOUT_REACH + can.tilt * 26) * s,
+    y: can.y + Math.cos(can.tilt) * 20 * s,
   };
 }
 
@@ -69,7 +70,7 @@ export function spoutOf(can: Can): { x: number; y: number } {
  * can's sideways momentum, so a can still moving when you press pours where it
  * was going. This is the whole skill of the game.
  */
-export function pourPoint(can: Can): { x: number; y: number } {
-  const spout = spoutOf(can);
+export function pourPoint(can: Can, layout: Layout): { x: number; y: number } {
+  const spout = spoutOf(can, layout);
   return { x: spout.x + can.vx * LEAD, y: spout.y };
 }

@@ -33,13 +33,13 @@ describe("the can", () => {
     for (let i = 0; i < 8; i += 1) can = stepCan(can, LAYOUT, can.x + 400, can.y, DT);
 
     expect(can.vx).toBeGreaterThan(0);
-    expect(pourPoint(can).x).toBeGreaterThan(spoutOf(can).x);
+    expect(pourPoint(can, LAYOUT).x).toBeGreaterThan(spoutOf(can, LAYOUT).x);
   });
 
   it("pours under the spout once it has settled", () => {
     const can = chase(LAYOUT.width / 2, 400);
     expect(Math.abs(can.vx)).toBeLessThan(1);
-    expect(pourPoint(can).x).toBeCloseTo(spoutOf(can).x, 1);
+    expect(pourPoint(can, LAYOUT).x).toBeCloseTo(spoutOf(can, LAYOUT).x, 1);
   });
 
   it("stays inside the frame however hard it is flicked", () => {

@@ -77,3 +77,12 @@ export function cellCentre(
     y: layout.originY + cy * layout.cell + layout.cell / 2,
   };
 }
+
+/**
+ * How big the can is drawn, relative to its 100px reference cell. Fixed pixel
+ * sizes made it dwarf a phone plot and look like a toy on a desktop one; the
+ * spout offsets scale with it so the stream still leaves the lip.
+ */
+export function canScale(layout: Layout): number {
+  return Math.max(0.55, Math.min(1.25, layout.cell / 100));
+}

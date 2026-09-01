@@ -143,3 +143,37 @@ describe("crit 5 spec: a game", () => {
     expect(SEASON_S).toBeLessThanOrEqual(120);
   });
 });
+
+describe("sensors: standards I hold the work to, whatever the brief is", () => {
+  // These outlive crit 5 and come forward into next week's repo — see
+  // spec/README.md on contract tests versus sensors.
+
+  it("simulates on a fixed timestep, independent of frame rate", () => {
+    // Tie a simulation to the frame rate and the same watering kills a plant
+    // on one machine and not another. Two different tick sizes covering the
+    // same elapsed time must land in the same place.
+    const play = (dt: number) => {
+      let garden = createGarden(5);
+      const plant = garden.plants[0];
+      if (!plant) throw new Error("expected a planted seed");
+      for (let elapsed = 0; elapsed < 20; elapsed += dt) {
+        garden = pour(garden, plant.cx - 1, plant.cy, POUR_PER_S * dt);
+        garden = step(garden, dt);
+      }
+      return garden.plants[0]?.growth ?? 0;
+    };
+    expect(play(1 / 120)).toBeCloseTo(play(1 / 60), 2);
+  });
+
+  it("replays a season identically from the same seed", () => {
+    // Determinism is what makes a hidden rule learnable rather than a coin
+    // toss, and it is what makes any of this testable at all.
+    const play = (seed: number) => {
+      let garden = createGarden(seed);
+      for (let i = 0; i < 60 * 30; i += 1) garden = step(garden, 1 / 60);
+      return JSON.stringify({ weeds: garden.weeds, plants: garden.plants });
+    };
+    expect(play(11)).toBe(play(11));
+    expect(play(11)).not.toBe(play(12));
+  });
+});

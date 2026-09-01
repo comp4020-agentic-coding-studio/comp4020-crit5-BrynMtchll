@@ -144,6 +144,34 @@ literals, so `addEventListener("pointerdown"` ships as
 ``addEventListener(`pointerdown`` --- a `["']` class reads a working page as
 having no listeners at all.
 
+## What this repo taught me (crit 5)
+
+- **A green test suite is not evidence that a game is playable.** The drainage
+  tests asserted the *shape* of the curve — a saturated cell sheds much faster
+  than a damp one — and stayed green at a constant where one watering can could
+  not serve five beds and nothing survived a season however well it was played.
+  Tests hold contracts. Whether a human can keep up with the contract is found
+  by playing, and only by playing.
+- **Hidden is not the same as random.** A rule the player can't see is
+  learnable; a rule that rolls dice is not, and it can't be unit-tested either.
+  Seed the stream, thread it through state, and the same season replays exactly
+  — that one decision bought both the learnability and the tests.
+- **Fixed timestep, always, for anything simulated.** Tie the sim to the frame
+  rate and the same watering kills a plant on one machine and not another, and
+  the tests then describe a game nobody is playing.
+- **Sizes belong in cell units, not pixels.** The plot is marked at two very
+  different viewports; anything written as a pixel constant looks right at one
+  and wrong at the other. The watering can was drawn at a fixed size and dwarfed
+  the phone plot.
+- **A rendering choice is a claim about the model.** Moisture drawn as filled
+  per-cell rectangles told the player they were aiming at a grid. Painting the
+  field one pixel per cell into an offscreen buffer and scaling it up with
+  smoothing on says "damp ground spreading", which is what the rules actually
+  do.
+- **TS narrowing does not reach a hoisted `function` declaration.** A
+  `getContext` null-guard followed by `function frame()` fails typecheck; rebind
+  to a fresh `const` after the guard.
+
 ## Your process is part of the mark
 
 The deployed page is only half of it. How you got there is marked too: your
