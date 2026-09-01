@@ -171,6 +171,65 @@ having no listeners at all.
 - **TS narrowing does not reach a hoisted `function` declaration.** A
   `getContext` null-guard followed by `function frame()` fails typecheck; rebind
   to a fresh `const` after the guard.
+- **A playability test needs the player's constraints, or it is an oracle.** The
+  first version of the winnability sensor watered whichever bed was driest every
+  tick and passed at a drainage constant that had shipped as unplayable. One can,
+  one place at a time, and a real gap while you carry it — that is what has
+  teeth. Model the hands, not just the rules.
+- **`every()` on an empty array is `true`.** An unsown bed was instantly declared
+  barren. Guard the empty case before reading a verdict off a fold.
+
+## Three.js, the hard-won parts (crit 5)
+
+- **`onBeforeCompile` GLSL injection silently does nothing here.** No compile
+  error, no effect, on either the vertex or the fragment path. Use three's own
+  map slots — `displacementMap` (negative `displacementScale` for a hole),
+  `roughnessMap`, `normalMap` — and paint into a `CanvasTexture`. Smaller code,
+  and visible in one reload.
+- **A rendering choice is a claim about the light.** Wet soil was darker albedo
+  and lower roughness and still read as a stain. The fix was the *sun*: a
+  specular lobe only reaches the viewer when the light is roughly opposite them,
+  so the key light belongs on the far side of the bed. Backlighting then needs a
+  weak fill from the camera side or every near surface goes to silhouette.
+- **`rotateX(-Math.PI / 2)` mirrors a plane's field front-to-back.** The plane's
+  +y becomes world −z, so every write into a per-cell texture needs
+  `row = h - 1 - cy`. It looks like a physics bug and it is an indexing bug.
+- **Raycast hit targets, not the objects themselves.** A tool drawn in the hand
+  sits directly under the cursor and intercepts presses meant for the ground.
+  Give each pickable a slot mesh (zero-opacity material — `visible = false` is
+  skipped by the raycaster) and pick against those.
+- **Fitting a camera is not the same as framing it.** Solving FOV and pitch to
+  contain a set of points is correct and can still look worse than a hand-placed
+  view: on the desktop frame it pitched the sky out of shot. Hand-frame the view
+  you can see; solve only the one no fixed FOV fits.
+- **Fog has two jobs that pull against each other.** It has to start beyond the
+  far corner of the playfield or the game looks hazy, and finish soon after or
+  the surrounding ground stays sharp to a hard horizon and there is no sky.
+- **Cap procedural detail by draw call, and share geometry.** A fuller shrub is
+  two dozen blades; building a lathe per leaf per rebuild makes a garden a
+  garbage-collection problem. Cache by rounded dimensions.
+
+## Instrumenting the rendered page
+
+- **Ship a dev-only probe, not screenshots-and-squinting.**
+  `globalThis.__beside()` (stripped by `import.meta.env.DEV`) reports sim state,
+  sampled albedo pixels, and the screen position of every tool slot and grid
+  cell. It is the difference between "does the wet patch read?" and
+  `(128,109,78)` against `(90,67,39)`.
+- **A probe must report *page* coordinates, not canvas coordinates.** The canvas
+  sits below a header; a probe that reports canvas-relative pixels sends every
+  scripted press ~55px high, and that only surfaces once the hit targets get
+  small enough to miss.
+- **`agent-browser console` returns accumulated history across page loads.** A
+  warning from code you deleted still reads as current. Restart the dev server
+  and clear `node_modules/.vite` before believing it.
+- **`agent-browser mouse click` is not reliable here; synthetic `PointerEvent`s
+  dispatched on the canvas are.** They exercise the same listeners. Related: wrap
+  `setPointerCapture` in a try/catch — it throws on a pointer id the browser
+  doesn't know, and an exception there takes the whole press with it.
+- **Brightness-mapping a screenshot finds the darkest thing, not the thing you
+  meant.** I "found" the wet patch and it was the watering can's own shadow,
+  parked on the spot it had just watered.
 
 ## Your process is part of the mark
 
